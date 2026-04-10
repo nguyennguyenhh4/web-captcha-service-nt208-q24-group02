@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAPTCHA Hành Vi - Member 1</title>
+    <link rel="stylesheet" href="style_fixed.css">
+</head>
+<body>
+    <main class="page">
+        <section class="captcha-card">
+            <h1>Xác minh người dùng</h1>
+            <p class="subtitle">Hoàn thành kéo mảnh ghép và vẽ tự do trong 3 giây.</p>
+
+            <div class="section-header">
+                <h2>1. Slider puzzle</h2>
+                <span id="puzzleHint" class="badge">Chưa hoàn thành</span>
+            </div>
+
+            <div class="puzzle-container" id="puzzleContainer" aria-label="Khu vực captcha dạng kéo mảnh ghép">
+                <div id="bg-image" aria-hidden="true"></div>
+                <div id="target-hole" aria-hidden="true"></div>
+                <div id="puzzle-piece" aria-hidden="true"></div>
+            </div>
+
+            <div class="slider-box" id="sliderBox">
+                <label for="captchaSlider">Kéo thanh trượt để di chuyển mảnh ghép</label>
+                <input
+                    type="range"
+                    id="captchaSlider"
+                    min="0"
+                    max="100"
+                    value="0"
+                    step="1"
+                    aria-describedby="sliderHelp"
+                >
+
+            <hr>
+
+            <div class="section-header">
+                <h2>2. Canvas vẽ</h2>
+                <span id="canvasTimer" class="badge">3.0s</span>
+            </div>
+
+            <div class="canvas-box">
+                <p id="shapePrompt">Hãy vẽ theo mẫu: ...</p>
+                    <canvas id="drawCanvas" width="300" height="120"></canvas>
+                    <button type="button" id="clearCanvas">Vẽ lại</button>
+            </div>
+
+            <div class="actions">
+                <button id="submitBtn" type="button">Gửi dữ liệu xác thực</button>
+                <button id="resetBtn" type="button" class="secondary">Làm lại</button>
+            </div>
+
+            <div id="status-msg" role="status" aria-live="polite"></div>
+        </section>
+    </main>
+
+   <script type="module" src="./js/main.js"></script>
+</body>
+</html>
