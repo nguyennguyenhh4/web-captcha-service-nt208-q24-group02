@@ -1,41 +1,29 @@
+# app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from scoring_logic import BehaviorScorer
+import traceback
 
 app = Flask(__name__)
-# Cho phép Frontend từ file/domain khác gọi vào API
-CORS(app) 
+CORS(app)
 
 @app.route('/captcha/verify', methods=['POST'])
-def verify_captcha():
+def verify():
     try:
-        # --- BƯỚC 1: NHẬN REQUEST ---
-        # Lấy payload từ body của request mà JS gửi lên
-        payload = request.get_json()
+        data = request.get_json()
         
-        if not payload:
-            return jsonify({"status": "error", "message": "No data received"}), 400
-
-        # --- BƯỚC 2: XỬ LÝ LOGIC (CHẤM ĐIỂM) ---
-        # Khởi tạo Class Logic và nạp payload vào
-        scorer = BehaviorScorer(payload)
-        # Thực hiện phân tích và lấy kết quả
-        result = scorer.analyze() 
-
-        # --- BƯỚC 3: TRẢ VỀ RESPONSE ---
-        # Tạo cấu trúc JSON trả về để Frontend hiển thị
-        response = {
-            "status": "success",
-            "is_human": result["is_human"],
-            "score": result["score"],
-            "received_events": len(payload.get("events", [])),
-            "message": "Xác thực hoàn tất"
-        }
+        # Khởi tạo lớp logic
+        scorer = BehaviorScorer(data)
+        # Gọi hàm xử lý
+        result = scorer.analyze_behavior()
         
-        return jsonify(response), 200
+        return jsonify(result), 200
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        # In chi tiết lỗi ra Terminal để bạn sửa code
+        print("--- SERVER ERROR ---")
+        traceback.print_exc() 
+        return jsonify({"result": "error", "message": str(e)}), 500
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True, port=5000)

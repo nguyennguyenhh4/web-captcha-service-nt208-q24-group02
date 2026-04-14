@@ -1,97 +1,65 @@
+# scoring_logic.py
 import math
-import json
 
 class BehaviorScorer:
-    def __init__(self, payload):
-        # --- Task 1: Input Handler ---
-        self.events = payload.get("events", [])
-        self.results = {}
-        
-    def calculate_metrics(self):
-        # Kiểm tra điều kiện tối thiểu
-        if len(self.events) < 5:
-            return None
+    def __init__(self, raw_data):
+        # Lấy mảng events từ payload
+        self.events = raw_data.get("events", [])
+        self.velocities = []
+        self.accelerations = []
 
-        # Tách mảng dữ liệu
-        x = [e['x'] for e in self.events]
-        y = [e['y'] for e in self.events]
-        t = [e['t'] for e in self.events]
+    def compute_physics(self):
+        """Tính toán dựa trên x, y, t đã được chuẩn hóa từ JS"""
+        if len(self.events) < 2:
+            return
 
-        # --- Task 2 & 3: Tính toán vật lý & Feature Extraction ---
-        velocities = []
-        accelerations = []
-        
-        for i in range(1, len(x)):
-            dt = (t[i] - t[i-1]) or 1 # Tránh chia cho 0
-            dist = math.sqrt((x[i] - x[i-1])**2 + (y[i] - y[i-1])**2)
-            v = dist / dt
-            velocities.append(v)
+        for i in range(1, len(self.events)):
+            p1 = self.events[i-1]
+            p2 = self.events[i]
+
+            # Tính khoảng cách trên hệ tọa độ chuẩn hóa (0 -> 1)
+            dist = math.sqrt((p2['x'] - p1['x'])**2 + (p2['y'] - p1['y'])**2)
             
-            if len(velocities) > 1:
-                dv = velocities[-1] - velocities[-2]
-                accelerations.append(dv / dt)
+            # Tính khoảng cách thời gian (t)
+            dt = (p2['t'] - p1['t'])
+            
+            # Tránh lỗi chia cho 0 (ZeroDivisionError -> Lỗi 500)
+            if dt <= 0:
+                continue 
+            
+            v = dist / dt
+            self.velocities.append(v)
 
-        # Tính độ lệch chuẩn của tốc độ (Speed Std) - Chỉ số quan trọng nhất
-        avg_speed = sum(velocities) / len(velocities)
-        speed_std = math.sqrt(sum((v - avg_speed)**2 for v in velocities) / len(velocities))
-        
-        # Kiểm tra độ thẳng (linearity)
-        # Nếu y hầu như không đổi, khả năng cao là bot kéo slider bằng script
-        y_diff = max(y) - min(y)
+            # Tính gia tốc (nếu đã có 2 vận tốc)
+            if len(self.velocities) > 1:
+                dv = self.velocities[-1] - self.velocities[-2]
+                self.accelerations.append(dv / dt)
 
-        self.results = {
-            "avg_speed": avg_speed,
-            "speed_std": speed_std,
-            "accel_max": max(accelerations) if accelerations else 0,
-            "y_variance": y_diff,
-            "point_count": len(self.events)
-        }
-        return self.results
+    def analyze_behavior(self):
+        try:
+            if len(self.events) < 5:
+                return {"result": "bot", "score": 0, "msg": "Quá ít dữ liệu"}
 
-    def get_final_score(self):
-        metrics = self.calculate_metrics()
-        if not metrics:
-            return {"score": 0, "result": "bot", "reason": "Too few events"}
+            self.compute_physics()
 
-        # --- Task 6: Scoring Logic ---
-        score = 0
-        # Người thật thường có tốc độ thay đổi (speed_std cao)
-        if metrics['speed_std'] > 0.0001: score += 0.5
-        # Người thật thường kéo hơi lệch tay (y không thẳng tuyệt đối)
-        if metrics['y_variance'] > 0: score += 0.3
-        # Người thật thường tạo ra nhiều điểm dữ liệu hơn do tay rung
-        if metrics['point_count'] > 15: score += 0.2
+            if not self.velocities:
+                return {"result": "bot", "score": 0.1, "msg": "Không tính được vận tốc"}
 
-        return {
-            "score": round(score, 2),
-            "result": "human" if score >= 0.6 else "bot",
-            "metrics": metrics
-        }
+            # Tính độ lệch chuẩn của vận tốc (Đặc trưng quan trọng nhất)
+            avg_v = sum(self.velocities) / len(self.velocities)
+            variance = sum((v - avg_v)**2 for v in self.velocities) / len(self.velocities)
+            std_dev = math.sqrt(variance)
 
-# --- Task 7: Output & Testing với Data giả ---
-if __name__ == "__main__":
-    # GIẢ LẬP DỮ LIỆU TỪ FRONTEND
-    # 1. Mẫu dữ liệu giống BOT (kéo thẳng, tốc độ đều)
-    bot_data = {
-        "events": [{"x": i/10, "y": 0.5, "t": i*20} for i in range(10)]
-    }
+            # Thuật toán quyết định: 
+            # Người thường có vận tốc thay đổi liên tục (std_dev cao)
+            # Bot thường có vận tốc không đổi (std_dev cực thấp)
+            score = round(min(std_dev * 2000, 1.0), 2) # Nhân hệ số để ra thang điểm 1
 
-    # 2. Mẫu dữ liệu giống NGƯỜI (có rung lắc, tốc độ thay đổi)
-    human_data = {
-        "events": [
-            {"x": 0.0, "y": 0.5, "t": 0},
-            {"x": 0.12, "y": 0.51, "t": 25},
-            {"x": 0.35, "y": 0.49, "t": 45},
-            {"x": 0.75, "y": 0.52, "t": 80},
-            {"x": 0.98, "y": 0.5, "t": 120},
-            {"x": 1.0, "y": 0.5, "t": 150}
-        ]
-    }
-
-    # IN KẾT QUẢ RA MÀN HÌNH
-    for name, data in [("BOT CASE", bot_data), ("HUMAN CASE", human_data)]:
-        scorer = BehaviorScorer(data)
-        final = scorer.get_final_score()
-        print(f"=== PHÂN TÍCH: {name} ===")
-        print(json.dumps(final, indent=4))
-        print("\n")
+            return {
+                "result": "human" if score > 0.3 else "bot",
+                "score": score,
+                "debug": {"std_dev": std_dev, "event_count": len(self.events)}
+            }
+        except Exception as e:
+            # Trả về lỗi dưới dạng JSON thay vì để Server crash lỗi 500
+            return {"result": "error", "score": 0, "msg": str(e)}
