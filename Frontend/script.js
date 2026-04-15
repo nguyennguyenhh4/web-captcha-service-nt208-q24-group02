@@ -1,108 +1,93 @@
-// 1. Cấu hình
-const CONFIG = {
-    targetX: 200, // Vị trí ngang của lỗ
-    targetY: 50,  // Vị trí dọc của lỗ
-    samplingRate: 20, 
-};
-
 let behaviorData = [];
 let startTime = null;
 let lastSampleTime = 0;
+let currentToken = null;
 
-// 2. Hàm khởi tạo (Chạy ngay khi load trang)
-window.onload = function() {
-    const piece = document.getElementById('puzzle-piece');
-    const hole = document.getElementById('target-hole');
-    const slider = document.getElementById('captchaSlider');
-
-    // Đặt vị trí lỗ
-    hole.style.left = CONFIG.targetX + 'px';
-    hole.style.top = CONFIG.targetY + 'px';
-
-    // Đặt vị trí mảnh ghép ban đầu
-    piece.style.top = CONFIG.targetY + 'px';
-    piece.style.left = '0px';
-
-    // Cắt ảnh cho mảnh ghép khớp với vị trí lỗ
-    piece.style.backgroundPosition = `-${CONFIG.targetX}px -${CONFIG.targetY}px`;
-
-    // 3. Logic kéo thanh trượt
-    slider.addEventListener('input', function(e) {
-        if (!startTime) startTime = Date.now();
-
-        const val = e.target.value; // Giá trị từ 0 đến 100
-        const containerWidth = 300;
-        const pieceSize = 50;
-        const maxMove = containerWidth - pieceSize;
-        
-        // Tính toán vị trí X mới
-        const currentX = (val / 100) * maxMove;
-        
-        // CẬP NHẬT VỊ TRÍ MẢNH GHÉP (Quan trọng nhất)
-        piece.style.left = currentX + 'px';
-
-        // Thu thập dữ liệu hành vi (Dùng tọa độ của chính mảnh ghép để không bị lỗi)
-        const rect = piece.getBoundingClientRect();
-        captureData(rect.left, rect.top, 'slider-move');
-    });
-};
-
-// 4. Hàm thu thập dữ liệu (Task 4, 5, 6)
-function captureData(rawX, rawY, type) {
-    const now = Date.now();
-    if (now - lastSampleTime < CONFIG.samplingRate) return;
-    lastSampleTime = now;
-
-    // Chuẩn hóa tọa độ x, y về khoảng 0 -> 1
-    const normX = (rawX / window.innerWidth).toFixed(4);
-    const normY = (rawY / window.innerHeight).toFixed(4);
-
-    behaviorData.push({
-        x: parseFloat(normX),
-        y: parseFloat(normY),
-        t: now - startTime,
-        type: type
-    });
+function loadNewCaptcha() {
+    fetch('http://127.0.0.1:5000/captcha/init')
+        .then(res => res.json())
+        .then(data => {
+            currentToken = data.token;
+            document.getElementById('bg-image').style.backgroundImage = `url(${data.bg})`;
+            const piece = document.getElementById('puzzle-piece');
+            piece.style.backgroundImage = `url(${data.piece})`;
+            piece.style.top = data.y + 'px';
+            piece.style.left = '0px';
+            
+            // Reset dữ liệu
+            document.getElementById('captchaSlider').value = 0;
+            document.getElementById('status-msg').innerText = "";
+            behaviorData = [];
+            startTime = null;
+            console.log("Captcha loaded. Token:", currentToken);
+        });
 }
 
-// 5. Logic Vẽ Canvas (Giữ nguyên)
-const canvas = document.getElementById('drawCanvas');
-const ctx = canvas.getContext('2d');
-let isDrawing = false;
+window.onload = loadNewCaptcha;
 
-canvas.addEventListener('mousedown', () => isDrawing = true);
-window.addEventListener('mouseup', () => isDrawing = false);
-canvas.addEventListener('mousemove', (e) => {
-    if (!isDrawing) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    ctx.fillStyle = "#000";
-    ctx.fillRect(x, y, 2, 2);
-    captureData(e.clientX, e.clientY, 'drawing');
+// Thu thập dữ liệu di chuyển
+document.getElementById('captchaSlider').addEventListener('input', function(e) {
+    if (!startTime) startTime = Date.now();
+    const val = e.target.value;
+    const currentX = (val / 100) * (300 - 50); // containerWidth - pieceSize
+    document.getElementById('puzzle-piece').style.left = currentX + 'px';
+
+    // Capture behavior
+    const now = Date.now();
+    if (now - lastSampleTime < 20) return;
+    lastSampleTime = now;
+    behaviorData.push({
+        x: parseFloat((currentX / window.innerWidth).toFixed(4)),
+        y: 0, // Trục Y coi như cố định trên slider
+        t: now - startTime,
+        type: 'slider-move'
+    });
 });
 
-// 6. Gửi dữ liệu (Task 7)
+// Gửi xác thực
 document.getElementById('submitBtn').addEventListener('click', function() {
-    const piece = document.getElementById('puzzle-piece');
-    const finalX = parseFloat(piece.style.left);
+    const finalX = parseFloat(document.getElementById('puzzle-piece').style.left);
     
     const payload = {
-        token: "session_" + Math.random().toString(36).substr(2, 9),
-        device: 'mouse',
+        token: currentToken,
+        user_x: finalX, // Gửi vị trí cuối cùng để server check Task 4
         events: behaviorData
     };
 
-    console.log("Dữ liệu gửi Backend:", payload);
+    fetch('http://127.0.0.1:5000/captcha/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+        const status = document.getElementById('status-msg');
+        if (data.result === "human") {
+            status.innerText = "Xác thực THÀNH CÔNG! Score: " + data.score;
+            status.style.color = "green";
+        } else {
+            status.innerText = "Thất bại: " + (data.msg || "Phát hiện Bot!");
+            status.style.color = "red";
+            // Tự động đổi hình mới khi thất bại
+            setTimeout(loadNewCaptcha, 1500);
+        }
+    });
+});
 
-    const diff = Math.abs(finalX - CONFIG.targetX);
-    const status = document.getElementById('status-msg');
-
-    if (diff < 10 && behaviorData.length > 5) {
-        status.innerText = "Xác thực THÀNH CÔNG!";
-        status.style.color = "green";
-    } else {
-        status.innerText = "Xác thực THẤT BẠI. Hãy kéo khớp hình!";
-        status.style.color = "red";
+document.getElementById('clearCanvas').addEventListener('click', function() {
+    // 1. Gọi lại hàm loadNewCaptcha đã viết ở Task 1
+    loadNewCaptcha(); 
+    
+    // 2. Xóa các dữ liệu cũ để đảm bảo tính chính xác cho lần kéo mới
+    behaviorData = []; 
+    startTime = null;
+    
+    // 3. (Tùy chọn) Xóa hình đã vẽ trên Canvas nếu bạn có dùng phần vẽ
+    const canvas = document.getElementById('drawCanvas');
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
+
+    console.log("Đã làm mới thử thách Captcha.");
 });
