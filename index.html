@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAPTCHA Hành Vi - Member 1</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="captcha-card">
+        <h3>Xác minh người dùng</h3>
+        
+        <!-- Khu vực Puzzle -->
+        <div class="puzzle-container" id="puzzleContainer">
+            <div id="bg-image"></div>
+            <div id="target-hole"></div>
+            <div id="puzzle-piece"></div>
+        </div>
+
+        <!-- Slider điều khiển -->
+        <div class="slider-box">
+            <input type="range" id="captchaSlider" min="0" max="100" value="0">
+            <p>Kéo để khớp hình ảnh</p>
+        </div>
+
+        <hr>
+
+        <!-- Khu vực Vẽ -->
+        <div class="canvas-box">
+            <p>Vẽ một đường bất kỳ (3s):</p>
+            <canvas id="drawCanvas" width="300" height="120"></canvas>
+            <button type="button" id="clearCanvas">Xóa vẽ lại</button>
+        </div>
+
+        <button id="submitBtn">Gửi dữ liệu xác thực</button>
+        
+        <!-- Thông báo kết quả -->
+        <div id="status-msg"></div>
+    </div>
+
+    <script src="script.js"></script>
+
+</body>
+</html>
