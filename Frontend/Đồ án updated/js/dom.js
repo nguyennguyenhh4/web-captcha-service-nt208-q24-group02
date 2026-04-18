@@ -1,5 +1,6 @@
 export const dom = {
   puzzleContainer: document.getElementById("puzzleContainer"),
+  bgImage: document.getElementById("bg-image"),
   hole: document.getElementById("target-hole"),
   piece: document.getElementById("puzzle-piece"),
   slider: document.getElementById("captchaSlider"),

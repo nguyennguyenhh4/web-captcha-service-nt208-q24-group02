@@ -12,6 +12,57 @@ export function chooseRandomShape() {
   if (dom.shapePrompt) {
     dom.shapePrompt.innerText = `Hãy vẽ theo mẫu: ${state.expectedShape}`;
   }
+
+  // Vẽ dấu chấm theo hình đã chọn
+  drawDots(state.expectedShape);
+}
+function drawDots(shape) {
+  const ctx = dom.canvas.getContext("2d");
+  ctx.fillStyle = "#FF0000";  // Màu đỏ cho dấu chấm
+  const canvasWidth = dom.canvas.width;
+  const canvasHeight = dom.canvas.height;
+
+  const sideLength = 100;  // Độ dài cạnh cho hình vuông
+  const radius = 50;  // Bán kính cho hình tròn
+  const points = [];  // Mảng chứa các điểm vẽ dấu chấm
+
+  // Vẽ dấu chấm theo hình vuông
+  if (shape === "vuông") {
+    points.push(
+      { x: canvasWidth / 2 - sideLength / 2, y: canvasHeight / 2 - sideLength / 2 },  // Góc trái trên
+      { x: canvasWidth / 2 + sideLength / 2, y: canvasHeight / 2 - sideLength / 2 },  // Góc phải trên
+      { x: canvasWidth / 2 - sideLength / 2, y: canvasHeight / 2 + sideLength / 2 },  // Góc trái dưới
+      { x: canvasWidth / 2 + sideLength / 2, y: canvasHeight / 2 + sideLength / 2 }   // Góc phải dưới
+    );
+  }
+
+  // Vẽ dấu chấm theo hình tròn
+  else if (shape === "tròn") {
+    const centerX = canvasWidth / 2;
+    const centerY = canvasHeight / 2;
+    for (let angle = 0; angle < 360; angle += 45) {  // Chia thành các điểm trên vòng tròn
+      const radian = (angle * Math.PI) / 180;
+      const x = centerX + radius * Math.cos(radian);
+      const y = centerY + radius * Math.sin(radian);
+      points.push({ x, y });
+    }
+  }
+
+  // Vẽ dấu chấm theo hình tam giác
+  else if (shape === "tam giác") {
+    points.push(
+      { x: canvasWidth / 2, y: canvasHeight / 2 - sideLength / 2 },  // Đỉnh tam giác
+      { x: canvasWidth / 2 - sideLength / 2, y: canvasHeight / 2 + sideLength / 2 },  // Góc trái dưới
+      { x: canvasWidth / 2 + sideLength / 2, y: canvasHeight / 2 + sideLength / 2 }   // Góc phải dưới
+    );
+  }
+
+  // Vẽ các dấu chấm
+  points.forEach(point => {
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 5, 0, 2 * Math.PI);  // Vẽ dấu chấm nhỏ
+    ctx.fill();
+  });
 }
 
 function updateCanvasTimerText(text) {
@@ -23,7 +74,7 @@ export function startCanvasTimer() {
 
   state.canvasStartTime = Date.now();
   state.canvasLocked = false;
-  updateCanvasTimerText("3.0s");
+  updateCanvasTimerText("5.0s");
 
   state.canvasTimerId = setInterval(() => {
     const elapsed = Date.now() - state.canvasStartTime;
@@ -36,7 +87,7 @@ export function startCanvasTimer() {
       clearInterval(state.canvasTimerId);
       state.canvasTimerId = null;
       updateCanvasTimerText("Hết giờ");
-      setStatus("Hết 3 giây vẽ.", "orange");
+      setStatus("Hết 5 giây vẽ.", "orange");
     }
   }, 100);
 }
@@ -87,7 +138,7 @@ export function clearCanvasOnly() {
     state.canvasTimerId = null;
   }
 
-  updateCanvasTimerText("3.0s");
+  updateCanvasTimerText("5.0s");
 }
 
 export function resetCanvas() {
