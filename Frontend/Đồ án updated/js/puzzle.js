@@ -69,16 +69,18 @@ export function snapCheck() {
   updatePuzzleHint();
 }
 
-export function resetPuzzle() {
+export function resetPuzzle(targetX, targetY) {
   dom.slider.value = "0";
   state.puzzleSolved = false;
   state.lastPointByArea.puzzle = null;
-  
+
+  state.targetX = targetX;
+  state.targetY = targetY;
+
   const newImageUrl = `https://picsum.photos/640/360?grayscale&t=${Date.now()}&rand=${Math.random()}`;
   dom.bgImage.style.backgroundImage = `url("${newImageUrl}")`;
-  dom.piece.style.backgroundImage = `url("${newImageUrl}")`;
-  
-  randomizeTargetPosition();
+  dom.piece.style.backgroundImage   = `url("${newImageUrl}")`;
+
   renderPuzzle();
 }
 
