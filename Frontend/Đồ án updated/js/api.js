@@ -3,8 +3,15 @@ import { state } from "./state.js";
 import { setStatus } from "./ui.js";
 
 export async function submitCaptcha() {
+  // Tính vị trí X thực tế từ slider
+  const sliderEl = document.getElementById("captchaSlider");
+  const container = document.getElementById("puzzleContainer");
+  const maxMove = container.offsetWidth - CONFIG.pieceSize;
+  const user_x = Math.round((Number(sliderEl.value) / 100) * maxMove);
+
   const payload = {
     token: state.token,
+    user_x: user_x,
     startTime: state.startTime,
     device: state.device,
     expectedShape: state.expectedShape,
@@ -12,6 +19,11 @@ export async function submitCaptcha() {
   };
 
   console.log("PAYLOAD:", payload);
+
+  if (!state.token) {
+    setStatus("Chưa có token. Tải lại trang.", "red");
+    return;
+  }
 
   if (!state.puzzleSolved) {
     setStatus("Puzzle chưa khớp.", "red");
@@ -33,9 +45,9 @@ export async function submitCaptcha() {
     });
 
     const data = await res.json();
-    setStatus("Gửi thành công: " + JSON.stringify(data), "green");
+    setStatus("Kết quả: " + JSON.stringify(data), "green");
   } catch (err) {
-    console.log(payload);
-    setStatus("Không gửi được backend, nhưng payload đã sẵn sàng.", "orange");
+    console.error(err);
+    setStatus("Không gửi được backend.", "red");
   }
 }
