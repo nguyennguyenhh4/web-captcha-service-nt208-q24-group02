@@ -87,18 +87,21 @@ export function startCanvasTimer() {
       clearInterval(state.canvasTimerId);
       state.canvasTimerId = null;
       updateCanvasTimerText("Hết giờ");
-      setStatus("Hết 5 giây vẽ.", "orange");
+      // [ĐÃ XÓA] setStatus("Hết 5 giây vẽ.", "orange");
     }
   }, 100);
 }
 
 function getCanvasPos(e) {
-  const rect = dom.canvas.getBoundingClientRect();
+  const rect   = dom.canvas.getBoundingClientRect();
+  // [ĐÃ SỬA] Scale tọa độ CSS → canvas internal pixel
+  const scaleX = dom.canvas.width  / rect.width;
+  const scaleY = dom.canvas.height / rect.height;
 
   if (e.touches && e.touches[0]) {
     return {
-      x: e.touches[0].clientX - rect.left,
-      y: e.touches[0].clientY - rect.top,
+      x: (e.touches[0].clientX - rect.left) * scaleX,
+      y: (e.touches[0].clientY - rect.top)  * scaleY,
       clientX: e.touches[0].clientX,
       clientY: e.touches[0].clientY,
     };
@@ -106,16 +109,16 @@ function getCanvasPos(e) {
 
   if (e.changedTouches && e.changedTouches[0]) {
     return {
-      x: e.changedTouches[0].clientX - rect.left,
-      y: e.changedTouches[0].clientY - rect.top,
+      x: (e.changedTouches[0].clientX - rect.left) * scaleX,
+      y: (e.changedTouches[0].clientY - rect.top)  * scaleY,
       clientX: e.changedTouches[0].clientX,
       clientY: e.changedTouches[0].clientY,
     };
   }
 
   return {
-    x: e.clientX - rect.left,
-    y: e.clientY - rect.top,
+    x: (e.clientX - rect.left) * scaleX,
+    y: (e.clientY - rect.top)  * scaleY,
     clientX: e.clientX,
     clientY: e.clientY,
   };

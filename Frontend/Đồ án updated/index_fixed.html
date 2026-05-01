@@ -58,6 +58,9 @@
         </section>
     </main>
 
-   <script type="module" src="./js/main.js"></script>
+   <script type="module">
+     const v = Date.now();
+     import(`./js/main.js?v=${v}`);
+   </script>
 </body>
 </html>

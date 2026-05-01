@@ -242,8 +242,7 @@ button {
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-#submitBtn,
-#clearCanvas {
+#submitBtn {
     background: linear-gradient(135deg, #0099ff 0%, #00d4ff 100%);
     color: white;
     flex: 1;
@@ -251,14 +250,12 @@ button {
     box-shadow: 0 8px 20px rgba(0, 212, 255, 0.3);
 }
 
-#submitBtn:hover,
-#clearCanvas:hover {
+#submitBtn:hover {
     transform: translateY(-2px);
     box-shadow: 0 12px 30px rgba(0, 212, 255, 0.5);
 }
 
-#submitBtn:active,
-#clearCanvas:active {
+#submitBtn:active {
     transform: translateY(0);
     box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
 }
