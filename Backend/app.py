@@ -1,196 +1,293 @@
+"""
+CAPTCHA Service - Backend
+Main Flask application with endpoints for challenge generation and verification.
+"""
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import uuid
-import random
-import time
-import hashlib
+from datetime import datetime
 import json
-from scoring_logic import BehaviorScorer
+import secrets
+import sqlite3
+import os
+
+from config import Config
+from scoring_logic import verify_response, calculate_success_rate
+from utils import get_db, init_db
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Flask App Setup
+# ─────────────────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
+app.config.from_object(Config)
 CORS(app)
 
-EXPIRE_DURATION = 300         
+# Initialize database
+init_db(app)
 
-captcha_db: dict = {}         
+# ─────────────────────────────────────────────────────────────────────────────
+# Utility Functions
+# ─────────────────────────────────────────────────────────────────────────────
 
-recent_event_hashes: dict = {}  
-REPLAY_WINDOW = 600             
+def generate_token():
+    """Generate a unique session token."""
+    return secrets.token_urlsafe(16)
 
-rate_limit_log: dict = {}
-RATE_LIMITS = {
-    "init":   (10, 60),  
-    "verify": (20, 60),   
-}
+def generate_challenge():
+    """Generate random puzzle target position."""
+    import random
+    target_x = random.randint(80, 540)  # Safe range: 640px width - 50px piece
+    target_y = random.randint(10, 310)  # Safe range: 360px height - 50px piece
+    return target_x, target_y
 
+def store_session(token, target_x, target_y):
+    """Store challenge session in database."""
+    db = get_db()
+    cursor = db.cursor()
+    created_at = datetime.now().isoformat()
+    
+    cursor.execute("""
+        INSERT INTO sessions (token, target_x, target_y, created_at, status)
+        VALUES (?, ?, ?, ?, 'pending')
+    """, (token, target_x, target_y, created_at))
+    
+    db.commit()
 
-def _get_ip() -> str:
-    return request.headers.get("X-Forwarded-For", request.remote_addr).split(",")[0].strip()
+def retrieve_session(token):
+    """Retrieve session by token."""
+    db = get_db()
+    cursor = db.cursor()
+    
+    cursor.execute("""
+        SELECT token, target_x, target_y, created_at, status
+        FROM sessions WHERE token = ?
+    """, (token,))
+    
+    row = cursor.fetchone()
+    if row:
+        return {
+            'token': row[0],
+            'target_x': row[1],
+            'target_y': row[2],
+            'created_at': row[3],
+            'status': row[4]
+        }
+    return None
 
+def update_session_result(token, result_data):
+    """Update session with verification result."""
+    db = get_db()
+    cursor = db.cursor()
+    verified_at = datetime.now().isoformat()
+    
+    cursor.execute("""
+        UPDATE sessions 
+        SET status = ?, verified_at = ?, result = ?
+        WHERE token = ?
+    """, (
+        result_data['status'],
+        verified_at,
+        json.dumps(result_data),
+        token
+    ))
+    
+    db.commit()
 
-def _check_rate_limit(ip: str, endpoint: str) -> bool:
-    """Return True if the request is allowed, False if rate-limited."""
-    max_calls, window = RATE_LIMITS[endpoint]
-    now = time.time()
-    log = rate_limit_log.setdefault(ip, [])
-    rate_limit_log[ip] = [ts for ts in log if now - ts < window]
-    if len(rate_limit_log[ip]) >= max_calls:
-        return False
-    rate_limit_log[ip].append(now)
-    return True
+# ─────────────────────────────────────────────────────────────────────────────
+# Endpoints
+# ─────────────────────────────────────────────────────────────────────────────
 
-
-def _evict_expired():
-    now = time.time()
-    expired_tokens = [t for t, s in captcha_db.items() if now > s["expire_time"]]
-    for t in expired_tokens:
-        del captcha_db[t]
-    expired_hashes = [h for h, ts in recent_event_hashes.items() if now - ts > REPLAY_WINDOW]
-    for h in expired_hashes:
-        del recent_event_hashes[h]
-
-
-def _event_hash(events: list) -> str:
-    canonical = json.dumps(
-        [{"x": e.get("x"), "y": e.get("y"), "t": e.get("t")} for e in events],
-        sort_keys=True,
-    )
-    return hashlib.sha256(canonical.encode()).hexdigest()
-
-
-def _validate_events_timing(events: list, session_start: float) -> tuple[bool, str]:
-    if len(events) < 2:
-        return False, "Too few events"
-
-    ts = [e.get("t", 0) for e in events]
-
-    for i in range(1, len(ts)):
-        if ts[i] < ts[i - 1]:
-            return False, "Non-monotonic timestamps"
-
-    duration = ts[-1] - ts[0]
-    if duration < 300:
-        return False, f"Duration too short ({duration} ms)"
-    if duration > 30_000:
-        return False, f"Duration too long ({duration} ms)"
-
-    real_elapsed_ms = (time.time() - session_start) * 1000
-    if real_elapsed_ms < 200:
-        return False, "Verified too quickly after init"
-
-    return True, "ok"
-
-
-def _validate_coordinate_consistency(events: list, user_x: float, target_x: int) -> tuple[bool, str]:
-    TRACK_WIDTH = 300  
-
-    if abs(user_x - target_x) > 10:
-        return False, "user_x too far from target_x"
-    puzzle_events = [e for e in events if e.get("area") == "puzzle"]
-    if not puzzle_events:
-        return False, "No puzzle events found"
-
-    last_x_norm = puzzle_events[-1].get("x", None)
-    if last_x_norm is None:
-        return False, "Missing x in last puzzle event"
-
-    user_x_norm = user_x / TRACK_WIDTH
-    if abs(last_x_norm - user_x_norm) > 0.05:
-        return False, (
-            f"user_x ({user_x_norm:.3f} normalised) doesn't match "
-            f"last puzzle event x ({last_x_norm:.3f})"
-        )
-
-    return True, "ok"
-
-
-@app.route("/captcha/init", methods=["GET"])
+@app.route('/captcha/init', methods=['GET'])
 def init_captcha():
-    _evict_expired()
-
-    ip = _get_ip()
-    if not _check_rate_limit(ip, "init"):
-        return jsonify({"result": "bot", "msg": "Too many requests"}), 429
-
-    token = str(uuid.uuid4())
-    target_x = random.randint(80, 240)
-    target_y = random.randint(10, 90)
-
-    captcha_db[token] = {
-        "target_x":   target_x,
-        "created_at": time.time(),
-        "expire_time": time.time() + EXPIRE_DURATION,
-        "status":     "unused",
-        "ip":         ip,
-    }
-
-    return jsonify({
-        "token":    token,
-        "target_x": target_x,
-        "target_y": target_y,
-    })
-
-
-@app.route("/captcha/verify", methods=["POST"])
-def verify():
-    _evict_expired()
-
-    ip = _get_ip()
-    if not _check_rate_limit(ip, "verify"):
-        return jsonify({"result": "bot", "msg": "Too many requests — rate limited"}), 429
-
+    """
+    Initialize new captcha challenge.
+    Returns: {token, target_x, target_y}
+    """
     try:
-        data = request.get_json(force=True)
-        if not data:
-            return jsonify({"result": "bot", "msg": "No JSON body"}), 400
-
-        token  = data.get("token")
-        user_x = data.get("user_x")
-        events = data.get("events", [])
-
-        if token not in captcha_db:
-            return jsonify({"result": "bot", "msg": "Token không tồn tại"}), 400
-
-        session = captcha_db[token]
-
-        if time.time() > session["expire_time"]:
-            session["status"] = "expired"
-            return jsonify({"result": "bot", "msg": "Token đã hết hạn"}), 400
-
-        if session["status"] == "used":
-            return jsonify({"result": "bot", "msg": "Token đã được sử dụng"}), 400
-
-        session["status"] = "used"
-
-        if session["ip"] != ip:
-            return jsonify({"result": "bot", "msg": "IP mismatch"}), 400
-
-        timing_ok, timing_msg = _validate_events_timing(events, session["created_at"])
-        if not timing_ok:
-            return jsonify({"result": "bot", "msg": f"Timing invalid: {timing_msg}"}), 200
-
-        if user_x is None:
-            return jsonify({"result": "bot", "msg": "Missing user_x"}), 400
-
-        coord_ok, coord_msg = _validate_coordinate_consistency(
-            events, float(user_x), session["target_x"]
-        )
-        if not coord_ok:
-            return jsonify({"result": "bot", "msg": f"Coordinate mismatch: {coord_msg}"}), 200
-
-        evt_hash = _event_hash(events)
-        if evt_hash in recent_event_hashes:
-            return jsonify({"result": "bot", "msg": "Replay attack detected"}), 200
-        recent_event_hashes[evt_hash] = time.time()
-
-        scorer = BehaviorScorer(data)
-        result = scorer.analyze_behavior()
-
-        return jsonify(result), 200
-
+        token = generate_token()
+        target_x, target_y = generate_challenge()
+        
+        # Store in database
+        store_session(token, target_x, target_y)
+        
+        return jsonify({
+            'status': 'ok',
+            'token': token,
+            'target_x': target_x,
+            'target_y': target_y
+        }), 200
+        
     except Exception as e:
-        return jsonify({"result": "error", "message": str(e)}), 500
+        print(f"Error in /captcha/init: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
+@app.route('/captcha/verify', methods=['POST'])
+def verify_captcha():
+    """
+    Verify captcha response.
+    Expected payload: {
+        token, user_x, startTime, device, expectedShape, events
+    }
+    Returns: {passed, bot_score, message, details}
+    """
+    try:
+        payload = request.get_json()
+        
+        # Validate payload
+        required_fields = ['token', 'user_x', 'events', 'expectedShape']
+        if not all(field in payload for field in required_fields):
+            return jsonify({
+                'passed': False,
+                'bot_score': 1.0,
+                'message': 'Missing required fields'
+            }), 400
+        
+        token = payload['token']
+        user_x = payload['user_x']
+        events = payload['events']
+        expected_shape = payload['expectedShape']
+        
+        # Retrieve session
+        session = retrieve_session(token)
+        if not session:
+            return jsonify({
+                'passed': False,
+                'bot_score': 1.0,
+                'message': 'Invalid or expired token'
+            }), 401
+        
+        # Verify response
+        result = verify_response(
+            user_x=user_x,
+            target_x=session['target_x'],
+            events=events,
+            expected_shape=expected_shape,
+            session_data=session
+        )
+        
+        # Update session with result
+        update_session_result(token, result)
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        print(f"Error in /captcha/verify: {e}")
+        return jsonify({
+            'passed': False,
+            'bot_score': 0.5,
+            'message': str(e)
+        }), 500
 
-if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    """
+    Get verification statistics.
+    Returns: {total, passed, failed, bot_blocked, success_rate}
+    """
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        
+        # Count total sessions
+        cursor.execute("SELECT COUNT(*) FROM sessions")
+        total = cursor.fetchone()[0]
+        
+        # Count passed/failed
+        cursor.execute("SELECT COUNT(*) FROM sessions WHERE status = 'passed'")
+        passed = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM sessions WHERE status = 'failed'")
+        failed = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM sessions WHERE status = 'bot_blocked'")
+        bot_blocked = cursor.fetchone()[0]
+        
+        success_rate = calculate_success_rate(passed, total) if total > 0 else 0
+        
+        return jsonify({
+            'status': 'ok',
+            'total': total,
+            'passed': passed,
+            'failed': failed,
+            'bot_blocked': bot_blocked,
+            'success_rate': round(success_rate, 2)
+        }), 200
+        
+    except Exception as e:
+        print(f"Error in /api/stats: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint."""
+    return jsonify({'status': 'ok', 'message': 'CAPTCHA service running'}), 200
+
+@app.route('/api/sessions', methods=['GET'])
+def list_sessions():
+    """
+    List all sessions (for debugging).
+    Returns: [{token, target_x, target_y, created_at, status}]
+    """
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        
+        cursor.execute("""
+            SELECT token, target_x, target_y, created_at, status
+            FROM sessions ORDER BY created_at DESC LIMIT 50
+        """)
+        
+        rows = cursor.fetchall()
+        sessions = [
+            {
+                'token': row[0],
+                'target_x': row[1],
+                'target_y': row[2],
+                'created_at': row[3],
+                'status': row[4]
+            }
+            for row in rows
+        ]
+        
+        return jsonify({
+            'status': 'ok',
+            'count': len(sessions),
+            'sessions': sessions
+        }), 200
+        
+    except Exception as e:
+        print(f"Error in /api/sessions: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Error Handlers
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({'status': 'error', 'message': 'Not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────────────────
+
+if __name__ == '__main__':
+    app.run(
+        host=Config.HOST,
+        port=Config.PORT,
+        debug=Config.DEBUG
+    )

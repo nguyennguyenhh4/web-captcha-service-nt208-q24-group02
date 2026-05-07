@@ -1,0 +1,8 @@
+- Cài đặt môi trường: requirements.txt
+
+- cd Frontend
+	python -m http.server 8000
+ 
+- cd Backend
+	python app.py
+- Web -> localhost:8000 -> index_fixed.html
