@@ -1,0 +1,17 @@
+captcha_backend/
+├── app.py                      ← chạy Flask, import routes
+├── config.py                   ← SECRET_KEY, TOKEN_TTL, SNAP_THRESHOLD
+├── routes/
+│   ├── __init__.py             ← đăng ký Blueprint
+│   └── captcha_routes.py       ← GET /init, POST /verify
+├── services/
+│   ├── session_service.py      ← tạo/xác thực token
+│   ├── behavior_analyzer.py    ← chấm điểm hành vi từ events[]
+│   └── puzzle_validator.py     ← so khớp user_x với target_x
+├── storage/
+│   ├── session_store.py        ← lưu session (dict hoặc Redis)
+│   └── image_store.py          ← random ảnh puzzle
+├── static/
+│   └── images/                 ← ảnh puzzle .jpg/.png
+├── .env
+└── requirements.txt
