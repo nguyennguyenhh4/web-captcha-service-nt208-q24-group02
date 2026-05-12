@@ -19,4 +19,8 @@ export const state = {
   targetX: 0,
   targetY: 0,
   expectedShape: "",
+
+  // Canvas shape validation
+  targetPoints: [],      // [{x, y, index}] – tọa độ pixel các chấm đỏ theo thứ tự
+  visitedDots: [],       // [boolean] – chấm nào đã được đi qua
 };

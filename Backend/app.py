@@ -104,6 +104,115 @@ def _validate_coordinate_consistency(events: list, user_x: float, target_x: int)
     return True, "ok"
 
 
+def _cross(o, a, b):
+    """Cross product của vector OA và OB."""
+    return (a["x"] - o["x"]) * (b["y"] - o["y"]) - (a["y"] - o["y"]) * (b["x"] - o["x"])
+
+
+def _segments_intersect(p1, p2, p3, p4):
+    """
+    Kiểm tra đoạn thẳng p1-p2 và p3-p4 có cắt nhau không (không tính chung đầu mút).
+    """
+    d1 = _cross(p3, p4, p1)
+    d2 = _cross(p3, p4, p2)
+    d3 = _cross(p1, p2, p3)
+    d4 = _cross(p1, p2, p4)
+    if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and \
+       ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)):
+        return True
+    return False
+
+
+def _validate_shape(events: list, target_points: list, canvas_w: float, canvas_h: float) -> tuple[bool, str]:
+    """
+    Kiểm tra người dùng có vẽ đúng hình không:
+    1. Đi qua đủ tất cả các điểm (theo thứ tự, CW hoặc CCW đều được).
+    2. Không có cạnh nào cắt chéo nhau.
+
+    target_points: [{x, y, index}] — tọa độ pixel canvas gửi từ frontend.
+    canvas_w/canvas_h: kích thước canvas (để quy đổi tọa độ normalized event về pixel).
+    """
+    if not target_points or len(target_points) < 2:
+        return False, "No target points provided"
+
+    n = len(target_points)
+
+    # --- Bước 1: Tìm thứ tự user đi qua các điểm ---
+    # Với mỗi canvas event (tọa độ normalized 0-1), kiểm tra có chạm điểm nào không.
+    HIT_RADIUS = 12  # pixel — rộng hơn frontend một chút để bù sai số normalize
+
+    visited_order = []   # index của điểm theo thứ tự user chạm
+    visited_set   = set()
+
+    for e in events:
+        if e.get("area") != "canvas":
+            continue
+        px = e["x"] * canvas_w
+        py = e["y"] * canvas_h
+        for pt in target_points:
+            idx = pt["index"]
+            if idx in visited_set:
+                continue
+            dx = px - pt["x"]
+            dy = py - pt["y"]
+            if (dx * dx + dy * dy) <= HIT_RADIUS * HIT_RADIUS:
+                visited_order.append(idx)
+                visited_set.add(idx)
+
+    # --- Bước 2: Kiểm tra đã đi qua đủ tất cả điểm chưa ---
+    if len(visited_set) < n:
+        missing = sorted(set(range(n)) - visited_set)
+        return False, f"Chưa đi qua đủ các điểm. Thiếu: {[m+1 for m in missing]}"
+
+    # --- Bước 2.5: Kiểm tra điểm đầu trùng điểm cuối ---
+    # Lấy tọa độ pixel của điểm đầu và điểm cuối trong canvas_events
+    canvas_events = [e for e in events if e.get("area") == "canvas"]
+    if len(canvas_events) < 2:
+        return False, "Không đủ canvas events để kiểm tra điểm đầu/cuối"
+
+    first = canvas_events[0]
+    last  = canvas_events[-1]
+
+    first_px = first["x"] * canvas_w
+    first_py = first["y"] * canvas_h
+    last_px  = last["x"]  * canvas_w
+    last_py  = last["y"]  * canvas_h
+
+    CLOSE_RADIUS = 15  # pixel — khoảng cách tối đa coi là "trùng nhau"
+    dist = ((last_px - first_px) ** 2 + (last_py - first_py) ** 2) ** 0.5
+    if dist > CLOSE_RADIUS:
+        return False, f"Điểm đầu và điểm cuối chưa khép kín (cách nhau {dist:.1f}px, tối đa {CLOSE_RADIUS}px)"
+
+    # --- Bước 3: Kiểm tra thứ tự hợp lệ ---
+    # Thứ tự hợp lệ là: 0,1,2,...,n-1 (CW) hoặc n-1,...,1,0 (CCW)
+    cw_order  = list(range(n))
+    ccw_order = list(reversed(range(n)))
+
+    # Normalize visited_order thành thứ tự bắt đầu từ 0 để so sánh
+    start_idx   = visited_order[0]
+    rotated_cw  = [(i - start_idx) % n for i in cw_order]
+    rotated_ccw = [(i - start_idx) % n for i in ccw_order]
+    normalized  = [(i - start_idx) % n for i in visited_order]
+
+    if normalized != rotated_cw and normalized != rotated_ccw:
+        return False, f"Thứ tự vẽ không hợp lệ. Thứ tự nhận được: {[v+1 for v in visited_order]}"
+
+    # --- Bước 4: Kiểm tra các cạnh không cắt chéo nhau ---
+    # Xây dựng polygon từ thứ tự user đã vẽ (đã khớp CW hoặc CCW ở trên)
+    pts = [target_points[i] for i in visited_order]
+    edges = [(pts[i], pts[(i + 1) % n]) for i in range(n)]
+
+    for i in range(len(edges)):
+        for j in range(i + 2, len(edges)):
+            # Bỏ qua cặp cạnh đầu-cuối liền kề nhau (chung đỉnh)
+            if i == 0 and j == len(edges) - 1:
+                continue
+            if _segments_intersect(edges[i][0], edges[i][1], edges[j][0], edges[j][1]):
+                return False, f"Hình vẽ bị cắt chéo giữa cạnh {i+1} và cạnh {j+1}"
+
+    return True, "ok"
+
+
 @app.route("/captcha/init", methods=["GET"])
 def init_captcha():
     _evict_expired()
@@ -182,6 +291,16 @@ def verify():
         if evt_hash in recent_event_hashes:
             return jsonify({"result": "bot", "msg": "Replay attack detected"}), 200
         recent_event_hashes[evt_hash] = time.time()
+
+        # --- Kiểm tra hình vẽ canvas ---
+        target_points = data.get("targetPoints", [])
+        canvas_w      = data.get("canvasWidth",  300)
+        canvas_h      = data.get("canvasHeight", 150)
+
+        if target_points:
+            shape_ok, shape_msg = _validate_shape(events, target_points, canvas_w, canvas_h)
+            if not shape_ok:
+                return jsonify({"result": "bot", "msg": f"Shape invalid: {shape_msg}"}), 200
 
         scorer = BehaviorScorer(data)
         result = scorer.analyze_behavior()

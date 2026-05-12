@@ -16,52 +16,83 @@ export function chooseRandomShape() {
   // Vẽ dấu chấm theo hình đã chọn
   drawDots(state.expectedShape);
 }
+const DOT_RADIUS = 8;         // Bán kính vùng hit-test của mỗi chấm (pixel)
+const DOT_DRAW_RADIUS = 5;    // Bán kính vẽ chấm trên canvas
+
+function buildPoints(shape, canvasWidth, canvasHeight) {
+  const sideLength = 100;
+  const radius = 50;
+  const cx = canvasWidth / 2;
+  const cy = canvasHeight / 2;
+  const points = [];
+
+  if (shape === "vuông") {
+    // Thứ tự CW: trái-trên → phải-trên → phải-dưới → trái-dưới
+    points.push(
+      { x: cx - sideLength / 2, y: cy - sideLength / 2 },
+      { x: cx + sideLength / 2, y: cy - sideLength / 2 },
+      { x: cx + sideLength / 2, y: cy + sideLength / 2 },
+      { x: cx - sideLength / 2, y: cy + sideLength / 2 },
+    );
+  } else if (shape === "tròn") {
+    // 8 điểm CW bắt đầu từ 0°
+    for (let angle = 0; angle < 360; angle += 45) {
+      const rad = (angle * Math.PI) / 180;
+      points.push({ x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) });
+    }
+  } else if (shape === "tam giác") {
+    // Thứ tự CW: đỉnh → phải-dưới → trái-dưới
+    points.push(
+      { x: cx,                  y: cy - sideLength / 2 },
+      { x: cx + sideLength / 2, y: cy + sideLength / 2 },
+      { x: cx - sideLength / 2, y: cy + sideLength / 2 },
+    );
+  }
+
+  return points.map((p, i) => ({ ...p, index: i }));
+}
+
 function drawDots(shape) {
   const ctx = dom.canvas.getContext("2d");
-  ctx.fillStyle = "#FF0000";  // Màu đỏ cho dấu chấm
-  const canvasWidth = dom.canvas.width;
+  const canvasWidth  = dom.canvas.width;
   const canvasHeight = dom.canvas.height;
 
-  const sideLength = 100;  // Độ dài cạnh cho hình vuông
-  const radius = 50;  // Bán kính cho hình tròn
-  const points = [];  // Mảng chứa các điểm vẽ dấu chấm
+  const points = buildPoints(shape, canvasWidth, canvasHeight);
 
-  // Vẽ dấu chấm theo hình vuông
-  if (shape === "vuông") {
-    points.push(
-      { x: canvasWidth / 2 - sideLength / 2, y: canvasHeight / 2 - sideLength / 2 },  // Góc trái trên
-      { x: canvasWidth / 2 + sideLength / 2, y: canvasHeight / 2 - sideLength / 2 },  // Góc phải trên
-      { x: canvasWidth / 2 - sideLength / 2, y: canvasHeight / 2 + sideLength / 2 },  // Góc trái dưới
-      { x: canvasWidth / 2 + sideLength / 2, y: canvasHeight / 2 + sideLength / 2 }   // Góc phải dưới
-    );
-  }
+  // Lưu vào state để dùng khi validate và gửi lên backend
+  state.targetPoints = points;
+  state.visitedDots  = new Array(points.length).fill(false);
 
-  // Vẽ dấu chấm theo hình tròn
-  else if (shape === "tròn") {
-    const centerX = canvasWidth / 2;
-    const centerY = canvasHeight / 2;
-    for (let angle = 0; angle < 360; angle += 45) {  // Chia thành các điểm trên vòng tròn
-      const radian = (angle * Math.PI) / 180;
-      const x = centerX + radius * Math.cos(radian);
-      const y = centerY + radius * Math.sin(radian);
-      points.push({ x, y });
-    }
-  }
-
-  // Vẽ dấu chấm theo hình tam giác
-  else if (shape === "tam giác") {
-    points.push(
-      { x: canvasWidth / 2, y: canvasHeight / 2 - sideLength / 2 },  // Đỉnh tam giác
-      { x: canvasWidth / 2 - sideLength / 2, y: canvasHeight / 2 + sideLength / 2 },  // Góc trái dưới
-      { x: canvasWidth / 2 + sideLength / 2, y: canvasHeight / 2 + sideLength / 2 }   // Góc phải dưới
-    );
-  }
-
-  // Vẽ các dấu chấm
-  points.forEach(point => {
+  points.forEach((point, i) => {
     ctx.beginPath();
-    ctx.arc(point.x, point.y, 5, 0, 2 * Math.PI);  // Vẽ dấu chấm nhỏ
+    ctx.arc(point.x, point.y, DOT_DRAW_RADIUS, 0, 2 * Math.PI);
+    ctx.fillStyle = "#FF0000";
     ctx.fill();
+
+    // Số thứ tự nhỏ bên cạnh chấm
+    ctx.fillStyle = "#cc0000";
+    ctx.font = "bold 11px sans-serif";
+    ctx.fillText(i + 1, point.x + 7, point.y - 5);
+  });
+}
+
+/**
+ * Kiểm tra điểm vẽ (px, py) có chạm vào chấm nào chưa visited không.
+ * Nếu có → đánh dấu visited, đổi màu chấm xanh lá.
+ */
+function checkDotHit(px, py) {
+  const ctx = dom.canvas.getContext("2d");
+  state.targetPoints.forEach((dot, i) => {
+    if (state.visitedDots[i]) return;
+    const dx = px - dot.x;
+    const dy = py - dot.y;
+    if (Math.sqrt(dx * dx + dy * dy) <= DOT_RADIUS) {
+      state.visitedDots[i] = true;
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, DOT_DRAW_RADIUS, 0, 2 * Math.PI);
+      ctx.fillStyle = "#00aa44";
+      ctx.fill();
+    }
   });
 }
 
@@ -135,6 +166,8 @@ export function clearCanvasOnly() {
   state.canvasStartTime = null;
   state.drawing = false;
   state.lastPointByArea.canvas = null;
+  state.targetPoints = [];
+  state.visitedDots  = [];
 
   if (state.canvasTimerId) {
     clearInterval(state.canvasTimerId);
@@ -159,6 +192,7 @@ export function initCanvasEvents() {
 
     const p = getCanvasPos(e);
     drawPoint(p.x, p.y);
+    checkDotHit(p.x, p.y);
 
     captureEvent({
       clientX: p.clientX,
@@ -176,6 +210,7 @@ export function initCanvasEvents() {
 
     const p = getCanvasPos(e);
     drawPoint(p.x, p.y);
+    checkDotHit(p.x, p.y);
 
     captureEvent({
       clientX: p.clientX,
@@ -214,6 +249,7 @@ export function initCanvasEvents() {
 
       const p = getCanvasPos(e);
       drawPoint(p.x, p.y);
+      checkDotHit(p.x, p.y);
 
       captureEvent({
         clientX: p.clientX,
@@ -236,6 +272,7 @@ export function initCanvasEvents() {
 
       const p = getCanvasPos(e);
       drawPoint(p.x, p.y);
+      checkDotHit(p.x, p.y);
 
       captureEvent({
         clientX: p.clientX,

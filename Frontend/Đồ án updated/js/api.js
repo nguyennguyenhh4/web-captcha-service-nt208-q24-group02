@@ -1,5 +1,6 @@
 import { CONFIG } from "./config.js";
 import { state } from "./state.js";
+import { dom } from "./dom.js";
 import { setStatus } from "./ui.js";
 
 export async function submitCaptcha() {
@@ -15,6 +16,9 @@ export async function submitCaptcha() {
     startTime: state.startTime,
     device: state.device,
     expectedShape: state.expectedShape,
+    targetPoints:  state.targetPoints,                      // [{x, y, index}]
+    canvasWidth:   dom.canvas?.width  || 300,
+    canvasHeight:  dom.canvas?.height || 150,
     events: state.events,
   };
 
