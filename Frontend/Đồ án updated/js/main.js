@@ -20,6 +20,12 @@ async function initSession() {
 }
 
 function resetSessionState() {
+  // Phải clear interval TRƯỚC khi null hóa — nếu null hóa trước thì clearCanvasOnly()
+  // sẽ không còn tham chiếu để clearInterval(), interval cũ vẫn chạy ngầm
+  // và sẽ set canvasLocked = true cho session mới → canvas bị treo.
+  if (state.canvasTimerId) {
+    clearInterval(state.canvasTimerId);
+  }
   state.token = "demo_" + Math.random().toString(36).slice(2, 10);
   state.startTime = null;
   state.device = "unknown";
