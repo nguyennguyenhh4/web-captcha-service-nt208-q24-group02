@@ -19,8 +19,8 @@ REPLAY_WINDOW = 600
 
 rate_limit_log: dict = {}
 RATE_LIMITS = {
-    "init":   (10, 60),  
-    "verify": (20, 60),   
+    "init":   (100, 60),  
+    "verify": (200, 60),   
 }
 
 

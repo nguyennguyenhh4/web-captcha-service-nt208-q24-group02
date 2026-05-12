@@ -75,7 +75,7 @@ export async function submitCaptcha() {
             document.getElementById("resetBtn").click();
         }, 1500);
     }
-  
+  }
   catch (err) {
     console.error(err);
     setStatus("Không gửi được backend.", "red");
