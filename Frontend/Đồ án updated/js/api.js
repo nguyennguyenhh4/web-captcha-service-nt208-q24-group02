@@ -49,8 +49,34 @@ export async function submitCaptcha() {
     });
 
     const data = await res.json();
-    setStatus("Kết quả: " + JSON.stringify(data), "green");
-  } catch (err) {
+
+   if (data.status === "success") {
+        // In ra màn hình dòng chữ "✅ Xác thực thành công!" màu xanh
+        setStatus(data.message, "green");
+        
+        // Báo cho Web Khách (website nhúng iframe) biết để mở khóa nút Đăng nhập
+        window.parent.postMessage({
+            type: "CAPTCHA_RESULT",
+            status: "success",
+            token: payload.token
+        }, "*");
+    } else {
+        // In ra màn hình dòng chữ báo lỗi màu đỏ
+        setStatus(data.message || "❌ Xác thực thất bại!", "red");
+        
+        // Báo cho Web Khách biết là thất bại
+        window.parent.postMessage({
+            type: "CAPTCHA_RESULT",
+            status: "failed"
+        }, "*");
+        
+        // Tự động bấm nút "Tải lại trang/hình mới" sau 1.5 giây để người dùng làm lại
+        setTimeout(() => {
+            document.getElementById("resetBtn").click();
+        }, 1500);
+    }
+  
+  catch (err) {
     console.error(err);
     setStatus("Không gửi được backend.", "red");
   }

@@ -139,7 +139,7 @@ def _validate_shape(events: list, target_points: list, canvas_w: float, canvas_h
 
     # --- Bước 1: Tìm thứ tự user đi qua các điểm ---
     # Với mỗi canvas event (tọa độ normalized 0-1), kiểm tra có chạm điểm nào không.
-    HIT_RADIUS = 12  # pixel — rộng hơn frontend một chút để bù sai số normalize
+    HIT_RADIUS = 8  # pixel — rộng hơn frontend một chút để bù sai số normalize
 
     visited_order = []   # index của điểm theo thứ tự user chạm
     visited_set   = set()
@@ -285,7 +285,11 @@ def verify():
             events, float(user_x), session["target_x"]
         )
         if not coord_ok:
-            return jsonify({"result": "bot", "msg": f"Coordinate mismatch: {coord_msg}"}), 200
+            return jsonify({
+                "status": "fail", 
+                "code": "coordinate_mismatch",
+                "message": "❌ Thao tác trượt không hợp lệ! Vui lòng thử lại."
+            }), 200
 
         evt_hash = _event_hash(events)
         if evt_hash in recent_event_hashes:
@@ -293,6 +297,18 @@ def verify():
         recent_event_hashes[evt_hash] = time.time()
 
         # --- Kiểm tra hình vẽ canvas ---
+        # 1. Chấm điểm hành vi AI (Human vs Bot)
+        scorer = BehaviorScorer(data)
+        behavior_result = scorer.analyze_behavior()
+
+        if behavior_result.get("result") == "bot":
+            return jsonify({
+                "status": "fail", 
+                "code": "bot_detected",
+                "message": "❌ Xác thực thất bại (Hành vi không hợp lệ)!"
+            }), 200
+
+        # 2. Nếu đã là Human -> Kiểm tra hình vẽ canvas
         target_points = data.get("targetPoints", [])
         canvas_w      = data.get("canvasWidth",  300)
         canvas_h      = data.get("canvasHeight", 150)
@@ -300,12 +316,18 @@ def verify():
         if target_points:
             shape_ok, shape_msg = _validate_shape(events, target_points, canvas_w, canvas_h)
             if not shape_ok:
-                return jsonify({"result": "bot", "msg": f"Shape invalid: {shape_msg}"}), 200
+                return jsonify({
+                    "status": "fail", 
+                    "code": "wrong_shape",
+                    "message": "❌ Vẽ sai hình! Vui lòng vẽ đúng thứ tự."
+                }), 200
 
-        scorer = BehaviorScorer(data)
-        result = scorer.analyze_behavior()
-
-        return jsonify(result), 200
+        # 3. Thành công hoàn toàn (Human + Vẽ đúng)
+        return jsonify({
+            "status": "success", 
+            "code": "pass",
+            "message": "✅ Xác thực thành công!"
+        }), 200
 
     except Exception as e:
         return jsonify({"result": "error", "message": str(e)}), 500
