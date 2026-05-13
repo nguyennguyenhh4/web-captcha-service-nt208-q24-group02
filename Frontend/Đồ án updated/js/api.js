@@ -4,7 +4,6 @@ import { dom } from "./dom.js";
 import { setStatus } from "./ui.js";
 
 export async function submitCaptcha() {
-  // Tính vị trí X thực tế từ slider
   const sliderEl = document.getElementById("captchaSlider");
   const container = document.getElementById("puzzleContainer");
   const maxMove = container.offsetWidth - CONFIG.pieceSize;
@@ -16,7 +15,7 @@ export async function submitCaptcha() {
     startTime: state.startTime,
     device: state.device,
     expectedShape: state.expectedShape,
-    targetPoints:  state.targetPoints,                      // [{x, y, index}]
+    targetPoints:  state.targetPoints,
     canvasWidth:   dom.canvas?.width  || 300,
     canvasHeight:  dom.canvas?.height || 150,
     events: state.events,
@@ -42,41 +41,26 @@ export async function submitCaptcha() {
   try {
     const res = await fetch(CONFIG.verifyUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
 
     const data = await res.json();
+    console.log("RESPONSE:", data);
 
-   if (data.status === "success") {
-        // In ra màn hình dòng chữ "✅ Xác thực thành công!" màu xanh
-        setStatus(data.message, "green");
-        
-        // Báo cho Web Khách (website nhúng iframe) biết để mở khóa nút Đăng nhập
-        window.parent.postMessage({
-            type: "CAPTCHA_RESULT",
-            status: "success",
-            token: payload.token
-        }, "*");
+    // ✅ BUG FIX #1: Backend trả về {"result":"human"} hoặc {"result":"bot"},
+    // KHÔNG phải {"status":"success"}. Code cũ luôn vào nhánh else → luôn fail!
+    if (data.result === "human") {
+      setStatus("✅ Xác thực thành công!", "green");
+      window.parent.postMessage({ type: "CAPTCHA_RESULT", status: "success", token: payload.token }, "*");
     } else {
-        // In ra màn hình dòng chữ báo lỗi màu đỏ
-        setStatus(data.message || "❌ Xác thực thất bại!", "red");
-        
-        // Báo cho Web Khách biết là thất bại
-        window.parent.postMessage({
-            type: "CAPTCHA_RESULT",
-            status: "failed"
-        }, "*");
-        
-        // Tự động bấm nút "Tải lại trang/hình mới" sau 1.5 giây để người dùng làm lại
-        setTimeout(() => {
-            document.getElementById("resetBtn").click();
-        }, 1500);
+      // Lấy message từ data.message hoặc data.msg (backend dùng cả hai tên)
+      const msg = data.message || data.msg || "❌ Xác thực thất bại!";
+      setStatus(msg, "red");
+      window.parent.postMessage({ type: "CAPTCHA_RESULT", status: "failed" }, "*");
+      setTimeout(() => { document.getElementById("resetBtn").click(); }, 1500);
     }
-  }
-  catch (err) {
+  } catch (err) {
     console.error(err);
     setStatus("Không gửi được backend.", "red");
   }

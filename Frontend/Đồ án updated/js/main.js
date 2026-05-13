@@ -2,8 +2,8 @@ import { CONFIG } from "./config.js";
 import { state } from "./state.js";
 import { setStatus } from "./ui.js";
 import { submitCaptcha } from "./api.js";
-import { initPuzzleEvents, resetPuzzle, randomizeTargetPosition } from "./puzzle.js";
-import { initCanvasEvents, resetCanvas } from "./canvas.js";
+import { initPuzzleEvents, resetPuzzle } from "./puzzle.js";
+import { initCanvasEvents, clearCanvasOnly, drawServerPoints } from "./canvas.js"; // ✅ thêm drawServerPoints
 
 async function initSession() {
   try {
@@ -12,10 +12,19 @@ async function initSession() {
     state.token = data.token;
     resetPuzzle(data.target_x, data.target_y);
     console.log("Token:", state.token, "| targetX:", data.target_x, "| targetY:", data.target_y);
+
+    // ✅ FIX: Dùng targetPoints từ server để vẽ lên canvas
+    // Trước đây bị bỏ qua hoàn toàn → frontend vẽ hình riêng, backend validate hình khác → luôn fail
+    if (data.targetPoints && data.targetPoints.length > 0) {
+      drawServerPoints(data.targetPoints);
+    } else {
+      console.warn("Server không trả về targetPoints!");
+    }
   } catch (err) {
-    console.warn("Backend offline — dùng vị trí random:", err);
-    // Fallback: random vị trí mà không cần backend
+    console.warn("Backend offline — không lấy được targetPoints:", err);
     resetPuzzle(null, null);
+    // Khi offline không có điểm nào để vẽ → báo user
+    setStatus("Không kết nối được backend.", "red");
   }
 }
 
@@ -41,17 +50,17 @@ function resetSessionState() {
 
 async function resetAll() {
   resetSessionState();
-  resetCanvas();
+  clearCanvasOnly(); // ✅ Chỉ clear canvas, KHÔNG tự sinh hình — đợi server trả về targetPoints
   await initSession();
   setStatus("CAPTCHA sẵn sàng.", "blue");
 }
 
 window.onload = async () => {
-  resetCanvas();
+  clearCanvasOnly(); // ✅ Chỉ clear canvas khi load, KHÔNG gọi resetCanvas() (vốn sinh hình ngẫu nhiên)
   initPuzzleEvents();
   initCanvasEvents();
 
-  await initSession();
+  await initSession(); // initSession sẽ gọi drawServerPoints với điểm từ server
 
   document.getElementById("submitBtn").addEventListener("click", submitCaptcha);
   document.getElementById("resetBtn").addEventListener("click", resetAll);

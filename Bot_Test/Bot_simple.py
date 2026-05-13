@@ -1,66 +1,211 @@
-import json, math, time, uuid, random
+"""
+Bot_simple.py — Bot đơn giản với trajectory tuyến tính (PHIÊN BẢN SỬA LỖI)
+
+SỬA LỖI CHÍNH:
+  1. [FIX COORD]  Puzzle events phải kết thúc tại x = target_x / TRACK_WIDTH (300).
+                  Bản cũ luôn kết thúc tại x=1.0 → server báo "Coordinate mismatch".
+  2. [FIX SHAPE]  get_token() nay đọc thêm targetPoints, canvasWidth, canvasHeight.
+                  build_canvas_events() vẽ đúng polygon server yêu cầu thay vì
+                  hình cố định (tròn/vuông/tam giác).
+  3. [FIX user_x] user_x giữ nguyên pixel (đúng), puzzle mouseup x = target_x/300.
+
+CÁC THAY ĐỔI HÀNH VI GIỮ NGUYÊN:
+  - Timing ngẫu nhiên, y dao động, think-time, micro-pause, breakdown theo shape
+"""
+import json, math, time, random
 import requests
 
 API_URL  = "http://127.0.0.1:5000/captcha/verify"
 API_INIT = "http://127.0.0.1:5000/captcha/init"
 N_REQUESTS = 10
+TRACK_WIDTH = 300   # phải khớp với backend
 
 
-def get_token(retries=3, delay=1.0):
+# ─── Token ────────────────────────────────────────────────────────────────────
+
+def get_token(retries=5, delay=15.0):
+    """
+    [SỬA LỖI #2] Trả về thêm target_points, canvas_w, canvas_h từ init response.
+    Bản cũ chỉ đọc token và target_x, bỏ qua targetPoints → vẽ hình sai.
+    """
     for attempt in range(retries):
         try:
             r = requests.get(API_INIT, timeout=3)
             if r.status_code == 429:
-                print(f"    [!] Rate limited (429) — chờ {delay}s...")
+                print(f"    [!] Rate limited — chờ {delay:.0f}s...")
                 time.sleep(delay)
                 continue
             d = r.json()
-            token = d.get("token")
-            if token:
-                return token, d.get("target_x", 120)
+            if d.get("token"):
+                return (
+                    d["token"],
+                    d.get("target_x", 120),
+                    d.get("targetPoints", []),   # ← MỚI: polygon server sinh ra
+                    d.get("canvasWidth",  300),
+                    d.get("canvasHeight", 150),
+                )
             print(f"    [!] Không có token: {d}")
         except Exception as e:
             print(f"    [!] Lỗi lần {attempt+1}: {e}")
-        time.sleep(delay)
-    return None, None
+        time.sleep(2.0)
+    return None, None, [], 300, 150
 
 
-def build_simple_bot_payload(token, user_x, n_points=12, interval_ms=20, y_fixed=0.5):
+# ─── Canvas event builder ─────────────────────────────────────────────────────
+
+def build_canvas_events(target_points, canvas_w=300, canvas_h=150, start_t=0):
+    """
+    [SỬA LỖI #2] Vẽ đúng polygon server yêu cầu thay vì hình cố định.
+
+    Chiến lược:
+    - target_points: [{x, y, index}] toạ độ pixel từ server.
+    - Chuẩn hóa về [0,1]: x_n = px/canvas_w, y_n = py/canvas_h.
+    - Nội suy STEPS_PER_SEG điểm giữa mỗi cặp đỉnh kề.
+    - Kép kín: quay về điểm đầu (CLOSE_RADIUS ≤ 15px → an toàn).
+    - Jitter ≤ 0.003 normalized (≤ 0.9px) → luôn trong HIT_RADIUS=12px.
+    """
+    STEPS_PER_SEG = 12   # đủ điểm để bộ score thấy event count cao
+
     events = []
+    t = start_t
+
+    # Sắp xếp theo index để đảm bảo thứ tự server mong đợi
+    pts_px = sorted(target_points, key=lambda p: p["index"])
+    n = len(pts_px)
+
+    if n == 0:
+        # Fallback: vẽ hình tròn nhỏ nếu không có target_points
+        for i in range(24):
+            angle = 2 * math.pi * i / 23
+            x = round(0.5 + 0.25 * math.cos(angle), 4)
+            y = round(0.5 + 0.25 * math.sin(angle), 4)
+            dt = random.randint(28, 65)
+            t += dt
+            events.append({"x": x, "y": y, "t": t, "dt": dt,
+                           "area": "canvas",
+                           "type": "mousedown" if i == 0 else "mousemove"})
+        t += 40
+        last = events[-1]
+        events.append({"x": last["x"], "y": last["y"], "t": t, "dt": 40,
+                        "area": "canvas", "type": "mouseup"})
+        return events, t
+
+    # Chuẩn hóa toạ độ pixel → [0,1]
+    def norm(px, py):
+        return (
+            max(0.0, min(1.0, round(px / canvas_w, 4))),
+            max(0.0, min(1.0, round(py / canvas_h, 4))),
+        )
+
+    # Tạo danh sách điểm khép kín: 0→1→…→n-1→0
+    pts_norm = [norm(p["x"], p["y"]) for p in pts_px]
+    pts_loop  = pts_norm + [pts_norm[0]]   # khép kín
+
+    first_event = True
+    for seg in range(len(pts_loop) - 1):
+        x0, y0 = pts_loop[seg]
+        x1, y1 = pts_loop[seg + 1]
+        steps = STEPS_PER_SEG if seg < len(pts_loop) - 2 else STEPS_PER_SEG // 2
+
+        for i in range(steps):
+            prog = i / max(steps - 1, 1)
+            # Nội suy tuyến tính + jitter nhỏ (≤ 0.003 norm ≈ 0.9px << HIT_RADIUS=12px)
+            x = round(x0 + (x1 - x0) * prog + random.uniform(-0.003, 0.003), 4)
+            y = round(y0 + (y1 - y0) * prog + random.uniform(-0.003, 0.003), 4)
+            x = max(0.0, min(1.0, x))
+            y = max(0.0, min(1.0, y))
+
+            dt = random.randint(28, 65)
+            if random.random() < 0.08:
+                dt += random.randint(60, 130)
+            t += dt
+
+            etype = "mousedown" if first_event else "mousemove"
+            first_event = False
+            events.append({"x": x, "y": y, "t": t, "dt": dt,
+                           "area": "canvas", "type": etype})
+
+    # mouseup khép kín tại điểm đầu (đảm bảo CLOSE_RADIUS ≤ 15px)
+    close_x, close_y = pts_norm[0]
+    t += 40
+    events.append({"x": close_x, "y": close_y, "t": t, "dt": 40,
+                   "area": "canvas", "type": "mouseup"})
+    return events, t
+
+
+# ─── Puzzle event builder ─────────────────────────────────────────────────────
+
+def build_simple_bot_payload(token, target_x, target_points,
+                              canvas_w, canvas_h, n_points=14):
+    """
+    [SỬA LỖI #1] Puzzle events kết thúc tại x = target_x / TRACK_WIDTH.
+    Bản cũ kết thúc tại x=1.0 trong khi user_x/300 ≠ 1.0 → mismatch.
+    """
+    # [SỬA #1] Tính tọa độ đích chuẩn hóa
+    target_norm = round(target_x / TRACK_WIDTH, 4)
+
+    # 1. Canvas events — vẽ đúng polygon server yêu cầu
+    canvas_evts, canvas_end = build_canvas_events(
+        target_points, canvas_w, canvas_h, start_t=0
+    )
+
+    # 2. Puzzle events — bắt đầu sau canvas + khoảng dừng ngắn
+    gap     = random.randint(300, 600)
+    p_start = canvas_end + gap
+    puzzle_evts = []
+    t = p_start
+    y_base = 0.5
+
     for i in range(n_points):
-        x     = round(i / (n_points - 1), 4)
-        t     = i * interval_ms
-        dt    = interval_ms if i > 0 else 0
-        dx    = round(1 / (n_points - 1), 4)
-        speed = round(dx / interval_ms, 4) if i > 0 else 0.0
-        events.append({
-            "x": x, "y": y_fixed,
-            "t": t, "dt": dt, "speed": speed,
+        # [SỬA #1] x chỉ đi đến target_norm, không đến 1.0
+        x  = round(i / (n_points - 1) * target_norm, 4)
+        dt = random.randint(14, 35) if i > 0 else 0
+        if i > 0 and random.random() < 0.07:
+            dt += random.randint(50, 120)   # micro-pause
+        t += dt
+        y = round(y_base + random.uniform(-0.015, 0.015), 4)
+        speed = round((target_norm / (n_points - 1)) / max(dt, 1), 4) if i > 0 else 0.0
+        puzzle_evts.append({
+            "x": x, "y": y, "t": t, "dt": dt, "speed": speed,
             "type": "mousemove" if i > 0 else "mousedown",
             "area": "puzzle",
         })
-    events.append({
-        "x": 1.0, "y": y_fixed,
-        "t": n_points * interval_ms, "dt": interval_ms,
+
+    # [SỬA #1] mouseup tại đúng target_norm
+    t += random.randint(15, 30)
+    puzzle_evts.append({
+        "x": target_norm,
+        "y": round(y_base + random.uniform(-0.01, 0.01), 4),
+        "t": t, "dt": t - puzzle_evts[-1]["t"],
         "speed": 0.0, "type": "mouseup", "area": "puzzle",
     })
+
     return {
         "token":         token,
-        "user_x":        user_x,
+        "user_x":        target_x,    # pixel — server so sánh với target_x ±10
         "startTime":     int(time.time() * 1000),
         "device":        "mouse",
-        "expectedShape": "vuông",
-        "events":        events,
+        "expectedShape": f"polygon_{len(target_points)}pts",
+        "events":        canvas_evts + puzzle_evts,
     }
 
 
+# ─── Attack ───────────────────────────────────────────────────────────────────
+
 def attack(payload, idx):
-    print(f"\n[{idx+1}] Gửi bot đơn giản — {len(payload['events'])} events")
-    print(f"    Token: {payload['token']}")
+    n_canvas = sum(1 for e in payload["events"] if e.get("area") == "canvas")
+    n_puzzle = sum(1 for e in payload["events"] if e.get("area") == "puzzle")
+    dur = payload["events"][-1]["t"] - payload["events"][0]["t"]
+    n_pts = payload.get("expectedShape", "?")
+    print(f"\n[{idx+1}] shape={n_pts}  canvas={n_canvas} puzzle={n_puzzle} dur={dur}ms")
     try:
-        r = requests.post(API_URL, json=payload, timeout=5)
+        r      = requests.post(API_URL, json=payload, timeout=5)
         result = r.json()
-        print(f"    HTTP {r.status_code}: {json.dumps(result)}")
+        verdict = result.get("result", "?")
+        score   = result.get("score", "?")
+        msg     = result.get("msg", "")
+        print(f"    HTTP {r.status_code} → result={verdict}  score={score}"
+              + (f"  [{msg}]" if msg else ""))
         return result
     except requests.exceptions.ConnectionError:
         print("    Backend offline — chạy offline")
@@ -72,42 +217,59 @@ def attack(payload, idx):
 
 def offline_score(payload):
     import sys, os
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Backend"))
     from scoring_logic import BehaviorScorer
     return BehaviorScorer(payload).analyze_behavior()
 
 
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     print("=" * 60)
-    print("BOT ĐƠN GIẢN — Tấn công /captcha/verify")
+    print("BOT ĐƠN GIẢN (SỬA LỖI) — Tấn công /captcha/verify")
+    print("  Fix: puzzle x → target_norm | canvas → polygon thật")
     print("=" * 60)
 
     results = []
     for i in range(N_REQUESTS):
-        token, target_x = get_token()
+        token, target_x, target_points, canvas_w, canvas_h = get_token()
         if token is None:
             print(f"\n[{i+1}] Bỏ qua — không lấy được token")
-            time.sleep(1.0)
+            time.sleep(2.0)
             continue
+
+        think_time = random.uniform(0.8, 2.5)
+        print(f"\n[{i+1}] think={think_time:.2f}s  target_x={target_x}"
+              f"  pts={len(target_points)} ...", end=" ", flush=True)
+        time.sleep(think_time)
+
         payload = build_simple_bot_payload(
             token=token,
-            user_x=target_x,
-            n_points=random.randint(8, 13),
-            interval_ms=20,
-            y_fixed=0.5,
+            target_x=target_x,
+            target_points=target_points,
+            canvas_w=canvas_w,
+            canvas_h=canvas_h,
+            n_points=random.randint(10, 15),
         )
         res = attack(payload, i)
         if res:
             results.append(res)
-        time.sleep(7)  
+        time.sleep(random.uniform(4.0, 6.0))
 
     print("\n" + "=" * 60)
     if results:
         passed  = [r for r in results if r.get("result") == "human"]
         blocked = [r for r in results if r.get("result") == "bot"]
+        errors  = [r for r in results if r.get("result") not in ("human", "bot")]
+        scores  = [r["score"] for r in results if isinstance(r.get("score"), (int, float))]
+
         print(f" Kết quả {len(results)} lần:")
-        print(f"   Qua được  (False Negative): {len(passed)}")
-        print(f"   Bị chặn   (True Positive) : {len(blocked)}")
+        print(f"   Qua được   (False Negative): {len(passed)}")
+        print(f"   Bị chặn    (True Positive) : {len(blocked)}")
+        print(f"   Lỗi / khác               : {len(errors)}")
         print(f"   Bypass rate: {len(passed)/len(results)*100:.1f}%")
+        if scores:
+            print(f"   Score: avg={sum(scores)/len(scores):.3f}  "
+                  f"min={min(scores):.3f}  max={max(scores):.3f}")
     else:
         print(" Không có kết quả nào")
