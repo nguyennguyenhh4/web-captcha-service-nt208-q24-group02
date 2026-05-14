@@ -14,8 +14,8 @@ Hệ thống của chúng ta gồm 2 phần chạy độc lập trên 2 Terminal
 
 ### Bước 2: Khởi chạy Frontend (Giao diện Captcha)
 1. Mở một cửa sổ CMD mới, di chuyển vào thư mục Frontend (thư mục chứa file index_fixed.html).
-2. Chạy lệnh: py -m http.server 3000
--> Giao diện Frontend sẽ hoạt động tại http://127.0.0.1:3000/index_fixed.html
+2. Chạy lệnh: py -m http.server 5500
+-> Giao diện Frontend sẽ hoạt động tại http://127.0.0.1:5500/index_fixed.html
 
 
 ## 2. Chú ý trước khi Deploy (Lên Server Thật)
