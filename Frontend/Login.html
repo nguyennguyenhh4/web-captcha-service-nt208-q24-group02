@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Trang Đăng Nhập Demo</title>
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .login-box {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            width: 500px;
+            text-align: center;
+        }
+
+        h2 { margin-bottom: 4px; color: #333; }
+        .subtitle { color: #888; font-size: 13px; margin-bottom: 20px; }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        input:focus { outline: none; border-color: #1a73e8; }
+
+        /* ── CAPTCHA wrapper ── */
+        #captchaWrapper {
+            margin-top: 16px;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            transition: height 0.4s ease, opacity 0.4s ease, margin 0.4s ease;
+        }
+
+        #captchaWrapper iframe {
+            width: 100%;
+            height: 580px;
+            border: none;
+            display: block;
+        }
+
+        /* ── Badge xác thực thành công ── */
+        #verifiedBadge {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 14px 20px;
+            background: #f0fff4;
+            border: 1px solid #68d391;
+            border-radius: 10px;
+            color: #276749;
+            font-size: 14px;
+            font-weight: 600;
+            margin-top: 16px;
+        }
+        #verifiedBadge .check-icon {
+            width: 22px; height: 22px;
+            background: #38a169;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        #verifiedBadge .check-icon svg {
+            width: 13px; height: 13px;
+            stroke: white; stroke-width: 2.5;
+            fill: none;
+        }
+
+        /* ── Nút đăng nhập ── */
+        #loginBtn {
+            width: 100%;
+            padding: 13px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: bold;
+            margin-top: 16px;
+            transition: background 0.25s, transform 0.15s;
+        }
+        #loginBtn:disabled {
+            background: #d1d5db;
+            color: #9ca3af;
+            cursor: not-allowed;
+        }
+        #loginBtn:not(:disabled) {
+            background: #1a73e8;
+            color: white;
+        }
+        #loginBtn:not(:disabled):hover {
+            background: #1558c0;
+            transform: translateY(-1px);
+        }
+
+        /* ── Overlay thành công ── */
+        #successOverlay {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(240, 242, 245, 0.95);
+            backdrop-filter: blur(6px);
+            z-index: 999;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            animation: fadeIn 0.35s ease;
+        }
+        #successOverlay.show { display: flex; }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .success-circle {
+            width: 80px; height: 80px;
+            border-radius: 50%;
+            background: #38a169;
+            display: flex; align-items: center; justify-content: center;
+            animation: popIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes popIn {
+            from { transform: scale(0); opacity: 0; }
+            to   { transform: scale(1); opacity: 1; }
+        }
+        .success-circle svg {
+            width: 40px; height: 40px;
+            stroke: white; stroke-width: 3;
+            fill: none; stroke-linecap: round; stroke-linejoin: round;
+        }
+        .success-title { font-size: 1.5rem; font-weight: bold; color: #1a1a1a; margin: 0; }
+        .success-sub   { color: #6b7280; font-size: 14px; margin: 0; }
+    </style>
+</head>
+<body>
+
+<div class="login-box">
+    <h2>Đăng Nhập Hệ Thống</h2>
+    <p class="subtitle">Hoàn thành xác minh CAPTCHA để tiếp tục</p>
+
+    <input type="text"     id="username" placeholder="Tên đăng nhập">
+    <input type="password" id="password" placeholder="Mật khẩu">
+
+    <!-- CAPTCHA iframe -->
+    <div id="captchaWrapper">
+        <iframe
+            id="captchaFrame"
+            src="http://127.0.0.1:5500/Frontend/index_fixed.html"
+            title="CAPTCHA xác minh hành vi"
+        ></iframe>
+    </div>
+
+    <!-- Hiện ra sau khi xác thực xong, thay chỗ iframe -->
+    <div id="verifiedBadge">
+        <div class="check-icon">
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        Xác minh thành công — bạn là người thật
+    </div>
+
+    <button id="loginBtn" disabled>Đăng Nhập</button>
+</div>
+
+<!-- Overlay toàn màn hình sau khi nhấn Đăng nhập -->
+<div id="successOverlay">
+    <div class="success-circle">
+        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+    </div>
+    <p class="success-title">Đăng nhập thành công!</p>
+    <p class="success-sub">Đang chuyển hướng vào hệ thống…</p>
+</div>
+
+<script>
+    // ── Nhận kết quả CAPTCHA từ iframe ──
+    window.addEventListener('message', function(event) {
+        if (!event.data || event.data.type !== "CAPTCHA_RESULT") return;
+
+        const loginBtn = document.getElementById('loginBtn');
+
+        if (event.data.status === "success") {
+
+            // 1. Thu nhỏ và ẩn iframe CAPTCHA
+            const wrapper = document.getElementById('captchaWrapper');
+            const currentH = wrapper.offsetHeight;
+            wrapper.style.height   = currentH + 'px'; // fix cứng để transition hoạt động
+            wrapper.style.overflow = 'hidden';
+
+            requestAnimationFrame(() => {
+                wrapper.style.transition = 'height 0.4s ease, opacity 0.4s ease, margin-top 0.4s ease';
+                wrapper.style.height     = '0px';
+                wrapper.style.opacity    = '0';
+                wrapper.style.marginTop  = '0';
+            });
+
+            // 2. Sau animation: ẩn hẳn wrapper, hiện badge
+            setTimeout(() => {
+                wrapper.style.display = 'none';
+                document.getElementById('verifiedBadge').style.display = 'flex';
+            }, 420);
+
+            // 3. Mở khoá nút Đăng nhập
+            loginBtn.disabled  = false;
+            loginBtn.innerText = 'Đăng Nhập';
+
+        } else if (event.data.status === "failed") {
+
+            loginBtn.disabled         = true;
+            loginBtn.innerText        = 'Xác Thực Thất Bại — Thử lại';
+            loginBtn.style.background = '#dc3545';
+            loginBtn.style.color      = 'white';
+
+            setTimeout(() => {
+                loginBtn.innerText        = 'Đăng Nhập';
+                loginBtn.style.background = '';
+                loginBtn.style.color      = '';
+            }, 2500);
+        }
+    });
+
+    // ── Nhấn Đăng nhập ──
+    document.getElementById('loginBtn').addEventListener('click', function() {
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value;
+
+        if (!username || !password) {
+            alert('Vui lòng nhập tên đăng nhập và mật khẩu.');
+            return;
+        }
+
+        // TODO: thay bằng fetch('/api/login', ...) khi có backend đăng nhập
+        document.getElementById('successOverlay').classList.add('show');
+    });
+</script>
+
+</body>
+</html>
