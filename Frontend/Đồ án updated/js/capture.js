@@ -8,9 +8,6 @@ function ensureStartTime() {
 
 function normalizePoint(clientX, clientY, area) {
   const rect = area.getBoundingClientRect();
-
-  // FIX Bug #2: <canvas> has .width/.height as internal pixel dimensions (e.g. 300×150),
-  // which can differ from CSS display size. Scale accordingly so coordinates match backend.
   // For non-canvas elements (div, etc.) .width is undefined → fall back to rect size (correct).
   const internalW = (area.tagName === "CANVAS" && area.width)  ? area.width  : rect.width;
   const internalH = (area.tagName === "CANVAS" && area.height) ? area.height : rect.height;
@@ -28,7 +25,7 @@ function normalizePoint(clientX, clientY, area) {
   };
 }
 
-// FIX Bug #4: Thêm tham số `force` (mặc định false).
+// tham số `force` (mặc định false).
 // canvas.js truyền force:true khi chuột/touch vừa chạm đỉnh polygon (hitNew=true),
 // để event này không bị throttle 16ms bỏ qua → backend _validate_shape không bị fail.
 export function captureEvent({ clientX, clientY, type, area, areaName, force = false }) {
