@@ -360,11 +360,6 @@ def verify():
                     "message": "❌ Vẽ sai hình! Vui lòng vẽ đúng thứ tự."
                 }), 200
 
-        # ─── FIX #3: Kiểm tra mật độ events ─────────────────────────────────
-        density_ok, density_msg = _validate_canvas_event_density(events, len(target_points))
-        if not density_ok:
-            return jsonify({"result": "bot", "message": f"❌ Hành vi bot bị phát hiện. Vui lòng thử lại."}), 200
-
         # Truyền target_points vào scorer để dùng cho corner velocity analysis
         scorer = BehaviorScorer(data, target_points=target_points,
                                 canvas_w=canvas_w, canvas_h=canvas_h)
