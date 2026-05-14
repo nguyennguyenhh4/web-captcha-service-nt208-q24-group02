@@ -3,7 +3,7 @@ import { state } from "./state.js";
 import { setStatus } from "./ui.js";
 import { submitCaptcha } from "./api.js";
 import { initPuzzleEvents, resetPuzzle } from "./puzzle.js";
-import { initCanvasEvents, clearCanvasOnly, drawServerPoints } from "./canvas.js"; // ✅ thêm drawServerPoints
+import { initCanvasEvents, clearCanvasOnly, drawServerPoints } from "./canvas.js"; // drawServerPoints
 
 async function initSession() {
   try {
@@ -13,8 +13,7 @@ async function initSession() {
     resetPuzzle(data.target_x, data.target_y);
     console.log("Token:", state.token, "| targetX:", data.target_x, "| targetY:", data.target_y);
 
-    // ✅ FIX: Dùng targetPoints từ server để vẽ lên canvas
-    // Trước đây bị bỏ qua hoàn toàn → frontend vẽ hình riêng, backend validate hình khác → luôn fail
+    // Dùng targetPoints từ server để vẽ lên canvas
     if (data.targetPoints && data.targetPoints.length > 0) {
       drawServerPoints(data.targetPoints);
     } else {
@@ -50,13 +49,13 @@ function resetSessionState() {
 
 async function resetAll() {
   resetSessionState();
-  clearCanvasOnly(); // ✅ Chỉ clear canvas, KHÔNG tự sinh hình — đợi server trả về targetPoints
+  clearCanvasOnly(); // Chỉ clear canvas, đợi server trả về targetPoints
   await initSession();
   setStatus("CAPTCHA sẵn sàng.", "blue");
 }
 
 window.onload = async () => {
-  clearCanvasOnly(); // ✅ Chỉ clear canvas khi load, KHÔNG gọi resetCanvas() (vốn sinh hình ngẫu nhiên)
+  clearCanvasOnly(); // Chỉ clear canvas khi load, KHÔNG gọi resetCanvas() (vốn sinh hình ngẫu nhiên)
   initPuzzleEvents();
   initCanvasEvents();
 
