@@ -4,23 +4,20 @@ import { dom, ctx } from "./dom.js";
 import { captureEvent } from "./capture.js";
 import { setStatus } from "./ui.js";
 
-// ✅ Đã xóa chooseRandomShape() — frontend không tự sinh hình nữa.
-// Điểm target phải lấy từ server qua drawServerPoints().
+// Điểm target lấy từ server qua drawServerPoints().
 
-const DOT_RADIUS      = 12;  // BUG FIX #2: tăng vùng hit từ 8→12px  // Bán kính vùng hit-test của mỗi chấm (pixel)
+const DOT_RADIUS      = 12;  // Bán kính vùng hit-test của mỗi chấm là 12px
 const DOT_DRAW_RADIUS = 5;  // Bán kính vẽ chấm trên canvas
 
 /**
- * ✅ HÀM MỚI — Nhận targetPoints từ server và vẽ lên canvas.
- * Thay thế hoàn toàn buildPoints() + drawDots() cũ vốn tự sinh hình riêng.
- *
+ * Nhận targetPoints từ server và vẽ lên canvas.
  * @param {Array<{x: number, y: number, index: number}>} serverPoints
  *   Tọa độ pixel canvas (trong không gian 300×150) do server tạo ra từ /captcha/init.
  */
 export function drawServerPoints(serverPoints) {
   const canvasCtx = dom.canvas.getContext("2d");
 
-  // Lưu vào state — đây là bộ điểm backend sẽ validate, phải khớp 1-1
+  // Lưu vào state 
   state.targetPoints = serverPoints.map((p, i) => ({ x: p.x, y: p.y, index: i }));
   state.visitedDots  = new Array(serverPoints.length).fill(false);
 
@@ -40,16 +37,14 @@ export function drawServerPoints(serverPoints) {
     canvasCtx.fillText(i + 1, point.x + 7, point.y - 5);
   });
 
-  // BUG 3 FIX — Reset hint về trạng thái ban đầu khi có bộ điểm mới
+  //Reset hint về trạng thái ban đầu khi có bộ điểm mới
   _hideCloseHint();
 }
 
 /**
  * Kiểm tra điểm vẽ (px, py) có chạm vào chấm nào chưa visited không.
- * Nếu có → đánh dấu visited, đổi màu chấm xanh lá.
- * Trả về true nếu vừa hit ít nhất một chấm mới (dùng cho Bug 1 fix).
- *
- * @returns {boolean}
+ * Nếu có, đánh dấu visited, đổi màu chấm xanh lá.
+ * Trả về true nếu vừa hit ít nhất một chấm mới .
  */
 function checkDotHit(px, py) {
   const canvasCtx = dom.canvas.getContext("2d");
@@ -71,10 +66,6 @@ function checkDotHit(px, py) {
 
   return hitNew;
 }
-
-// ---------------------------------------------------------------------------
-// BUG 3 HELPERS — Close-shape hint
-// ---------------------------------------------------------------------------
 
 /**
  * Hiện gợi ý "Kéo về điểm đầu để khép kín hình" sau khi user bắt đầu vẽ.
@@ -112,7 +103,7 @@ export function startCanvasTimer() {
     updateCanvasTimerText((remain / 1000).toFixed(1) + "s");
 
     if (elapsed >= CONFIG.minCanvasDurationMs) {
-      // BUG FIX #2: bỏ canvasLocked — timer chỉ là thông tin, không khóa canvas
+      // timer chỉ là thông tin, không khóa canvas
       clearInterval(state.canvasTimerId);
       state.canvasTimerId = null;
       updateCanvasTimerText("Hết giờ");
@@ -172,23 +163,23 @@ export function clearCanvasOnly() {
   }
 
   updateCanvasTimerText("5.0s");
-  _hideCloseHint(); // BUG 3 FIX — reset hint khi clear
+  _hideCloseHint(); //  reset hint khi clear
 }
 
-// ✅ resetCanvas() giờ chỉ clear — KHÔNG tự sinh hình nữa.
-// main.js sẽ gọi initSession() → drawServerPoints() sau khi clear.
+// resetCanvas() clear 
+// main.js gọi initSession() → drawServerPoints() sau khi clear.
 export function resetCanvas() {
   clearCanvasOnly();
 }
 
 export function initCanvasEvents() {
   dom.canvas.addEventListener("mousedown", (e) => {
-    // BUG FIX #2: removed canvasLocked check — timer is informational only
+    // timer is informational only
 
     state.device = "mouse";
     state.drawing = true;
     startCanvasTimer();
-    _showCloseHint(); // BUG 3 FIX — hint khép kín lần đầu vẽ
+    _showCloseHint(); // hint khép kín lần đầu vẽ
 
     const p = getCanvasPos(e);
     drawPoint(p.x, p.y);
@@ -204,16 +195,15 @@ export function initCanvasEvents() {
   });
 
   dom.canvas.addEventListener("mousemove", (e) => {
-    if (!state.drawing) return; // BUG FIX #2: removed canvasLocked check
+    if (!state.drawing) return; // removed canvasLocked check
 
     state.device = "mouse";
 
     const p = getCanvasPos(e);
     drawPoint(p.x, p.y);
 
-    // BUG 1 FIX — checkDotHit trả về true nếu vừa chạm chấm mới.
+    // checkDotHit trả về true nếu vừa chạm chấm mới.
     // Khi đó truyền force:true để captureEvent bỏ qua throttle 16ms,
-    // đảm bảo backend nhận đúng tọa độ hit dù chuột đi qua rất nhanh.
     const hitNew = checkDotHit(p.x, p.y);
 
     captureEvent({
@@ -222,7 +212,7 @@ export function initCanvasEvents() {
       type: "mousemove",
       area: dom.canvas,
       areaName: "canvas",
-      force: hitNew, // BUG 1 FIX
+      force: hitNew, 
     });
   });
 
@@ -246,12 +236,12 @@ export function initCanvasEvents() {
     "touchstart",
     (e) => {
       e.preventDefault();
-      // BUG FIX #2: removed canvasLocked check — timer is informational only
+      // timer is informational only
 
       state.device = "touch";
       state.drawing = true;
       startCanvasTimer();
-      _showCloseHint(); // BUG 3 FIX — hint khép kín lần đầu vẽ
+      _showCloseHint(); //  hint khép kín lần đầu vẽ
 
       const p = getCanvasPos(e);
       drawPoint(p.x, p.y);
@@ -272,14 +262,14 @@ export function initCanvasEvents() {
     "touchmove",
     (e) => {
       e.preventDefault();
-      if (!state.drawing) return; // BUG FIX #2: removed canvasLocked check
+      if (!state.drawing) return; 
 
       state.device = "touch";
 
       const p = getCanvasPos(e);
       drawPoint(p.x, p.y);
 
-      // BUG 1 FIX — same force logic as mousemove
+      // same force logic as mousemove
       const hitNew = checkDotHit(p.x, p.y);
 
       captureEvent({
@@ -311,14 +301,14 @@ export function initCanvasEvents() {
   });
 
   dom.clearCanvas.addEventListener("click", async () => {
-    // ✅ Khi clear: reset state, gọi lại server để lấy targetPoints mới
+    // Khi clear: reset state, gọi lại server để lấy targetPoints mới
     clearCanvasOnly();
     setStatus("Đang tải hình mới...", "blue");
     try {
       const res = await fetch(CONFIG.initUrl);
       const data = await res.json();
       // Cập nhật token và điểm mới từ server
-      state.token = data.token;  // BUG FIX #7: dùng trực tiếp state đã import, không dùng dynamic import()
+      state.token = data.token;  // dùng trực tiếp state đã import
       if (data.targetPoints && data.targetPoints.length > 0) {
         drawServerPoints(data.targetPoints);
       }
