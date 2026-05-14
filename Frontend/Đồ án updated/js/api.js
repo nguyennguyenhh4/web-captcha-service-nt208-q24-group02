@@ -48,8 +48,6 @@ export async function submitCaptcha() {
     const data = await res.json();
     console.log("RESPONSE:", data);
 
-    // ✅ BUG FIX #1: Backend trả về {"result":"human"} hoặc {"result":"bot"},
-    // KHÔNG phải {"status":"success"}. Code cũ luôn vào nhánh else → luôn fail!
     if (data.result === "human") {
       setStatus("✅ Xác thực thành công!", "green");
       window.parent.postMessage({ type: "CAPTCHA_RESULT", status: "success", token: payload.token }, "*");
