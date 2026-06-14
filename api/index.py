@@ -6,14 +6,18 @@ import time
 import hashlib
 import json
 import math
-from scoring_logic import BehaviorScorer
+import os
+import sys
 
+# Đảm bảo Python luôn tìm thấy các file trong cùng thư mục (giải quyết lỗi trên Vercel)
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from scoring_logic import BehaviorScorer
 app = Flask(__name__)
 
 # ─── FIX #1: Giới hạn CORS theo origin thay vì mở toàn bộ ───────────────────
-# Thay "https://yourdomain.com" bằng domain thật của frontend
-ALLOWED_ORIGINS = ["http://127.0.0.1:5500", "http://localhost:5500"]
-CORS(app, origins=ALLOWED_ORIGINS)
+# Cho phép tất cả các domain để dễ dàng tích hợp trên Vercel Preview
+CORS(app)
 
 EXPIRE_DURATION = 300
 CANVAS_W = 300
@@ -258,7 +262,7 @@ def _validate_canvas_event_density(events: list, n_target_points: int) -> tuple:
     return True, "ok"
 
 
-@app.route("/captcha/init", methods=["GET"])
+@app.route("/api/captcha/init", methods=["GET"])
 def init_captcha():
     _evict_expired()
     ip = _get_ip()
@@ -281,7 +285,7 @@ def init_captcha():
         "ip":            ip,
     }
 
-    return jsonify({
+    response = jsonify({
         "token":        token,
         "target_x":     target_x,
         "target_y":     target_y,
@@ -289,9 +293,13 @@ def init_captcha():
         "canvasWidth":  CANVAS_W,
         "canvasHeight": CANVAS_H,
     })
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
-@app.route("/captcha/verify", methods=["POST"])
+@app.route("/api/captcha/verify", methods=["POST"])
 def verify():
     _evict_expired()
     ip = _get_ip()
@@ -374,7 +382,21 @@ def verify():
 
 
 if __name__ == "__main__":
-    # FIX #4: Tắt debug=True trong production
     import os
+    from flask import send_from_directory
     debug_mode = os.environ.get("FLASK_DEBUG", "0") == "1"
+
+    # Mẹo để chạy Local: Phục vụ Frontend tĩnh trực tiếp từ Flask
+    # (Đoạn này không chạy trên Vercel vì Vercel chỉ import app)
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    @app.route('/')
+    def serve_root():
+        return send_from_directory(BASE_DIR, 'index.html')
+
+    @app.route('/<path:path>')
+    def serve_static(path):
+        return send_from_directory(BASE_DIR, path)
+
+    print("🚀 Server đang chạy tại: http://127.0.0.1:5000")
     app.run(debug=debug_mode, port=5000)
